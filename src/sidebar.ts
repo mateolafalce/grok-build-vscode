@@ -12471,11 +12471,12 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         }
         const before = await readGitTurnFileBefore(rootResult.root, msg.path, { sha: baseline.sha, untracked: baseline.untracked });
         if (!before.ok) { fail(before.reason); break; }
-        const after = this.readFileForDiff(path.join(rootResult.root, msg.path));
+        const after = this.readTurnAfterSide(path.join(rootResult.root, msg.path));
         if (after === undefined) {
-          // There is no region fallback here. An unreadable/oversized file
-          // must not masquerade as a whole-file deletion in a review tab.
-          fail("The current file could not be read for a diff. It may be missing or too large.");
+          // There is no region fallback here. A file we may not read, or one
+          // too big to hold twice, must not masquerade as a whole-file
+          // deletion in a review tab -- a real deletion is answered above.
+          fail("The current file could not be read for a diff. It may be too large.");
           break;
         }
         // The turnId is a randomUUID, so naming it here would spend 36
@@ -15693,11 +15694,30 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
   }
 
   /**
+   * The after side of a turn diff. A path the turn DELETED has no current
+   * content, and that is the diff rather than a failure: the before side comes
+   * from the baseline, so the tab can honestly show every line removed. Without
+   * this the native tab failed on every Deleted row -- the one shape where a
+   * 400-line inline cap makes the escape hatch necessary rather than optional.
+   *
+   * The split matters because {@link readFileForDiff} collapses three outcomes
+   * into one `undefined`: gone, too big to hold twice, and refused by desktop
+   * containment. Only the first may read as empty. A file nobody is allowed to
+   * read must still refuse, which is why the existence test comes first and the
+   * policy check stays inside the read.
+   */
+  private readTurnAfterSide(filePath: string): string | undefined {
+    if (!fs.existsSync(filePath)) return "";
+    return this.readFileForDiff(filePath);
+  }
+
+  /**
    * The file's current content, for native diff readers. Undefined
-   * when it can't be read — a create whose file doesn't exist yet, a file
-   * deleted since, or one too big to hold twice — which leaves the diff at the
-   * region-only fallback for a per-edit preview (#66). A turn diff has no
-   * trustworthy region to fall back to and reports the failed read instead.
+   * when it can't be read — a create whose file doesn't exist yet, or one too
+   * big to hold twice — which leaves the diff at the region-only fallback for a
+   * per-edit preview (#66). A turn diff has no trustworthy region to fall back
+   * to: it answers a deletion through {@link readTurnAfterSide} and reports
+   * only a genuinely failed read.
    */
   private readFileForDiff(filePath: string): string | undefined {
     try {

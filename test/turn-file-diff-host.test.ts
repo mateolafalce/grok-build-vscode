@@ -5,6 +5,8 @@ import * as git from "../src/git-run";
 import { emptyGitStatus } from "../src/git-status";
 import { SessionRequestState } from "../src/session-request-state";
 import path from "node:path";
+import fs from "node:fs";
+import os from "node:os";
 
 const SHA = "b".repeat(40);
 const BLOB = "c".repeat(40);
@@ -121,7 +123,7 @@ describe("host-local whole-file turn diff tabs", () => {
     const oldText = "before\n".repeat(900);
     const newText = "after\n".repeat(900);
     const before = vi.spyOn(git, "readGitTurnFileBefore").mockResolvedValue({ ok: true, text: oldText });
-    const disk = vi.spyOn(sidebar, "readFileForDiff").mockReturnValue(newText);
+    const disk = vi.spyOn(sidebar, "readTurnAfterSide").mockReturnValue(newText);
     const request = { type: "turnFileOpenDiff", turnId: "turn", cwd: "/repo", path: "a.ts" };
     return { sidebar, session, remember, before, disk, status, request, oldText, newText };
   }
@@ -189,6 +191,39 @@ describe("host-local whole-file turn diff tabs", () => {
     expect(before).not.toHaveBeenCalled();
     expect(sidebar.host.openDiff).not.toHaveBeenCalled();
     expect(sidebar.post).toHaveBeenCalledWith({ type: "error", text: "This turn's diff is no longer available." });
+  });
+
+  it("opens the deletion a turn performed, on the row the inline cap hurts most", async () => {
+    // A Deleted row is exactly where a 400-line inline preview is useless and
+    // the whole before side is already in hand, so refusing here made the new
+    // control dead on a whole category of rows.
+    const { sidebar, disk, request, oldText } = openFixture();
+    disk.mockReturnValue("");
+    await sidebar.onMessage(request, "local");
+    const [left, right, title] = sidebar.host.openDiff.mock.calls[0];
+    expect(sidebar.diffProvider.set.mock.calls).toEqual([[left, oldText], [right, ""]]);
+    expect(title).toBe("Turn diff: a.ts");
+    expect(sidebar.post).not.toHaveBeenCalled();
+  });
+
+  it("reads a vanished path as an empty side, and still delegates one that exists", () => {
+    // The seam that makes the case above distinguishable: readFileForDiff
+    // answers "gone", "too big to hold twice" and "desktop containment refused
+    // it" with the same undefined, and only the first may become an empty side.
+    const { sidebar, disk } = openFixture();
+    disk.mockRestore();
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "turn-after-"));
+    const present = path.join(dir, "a.ts");
+    fs.writeFileSync(present, "on disk\n");
+    const read = vi.spyOn(sidebar, "readFileForDiff").mockReturnValue("on disk\n");
+    try {
+      expect(sidebar.readTurnAfterSide(path.join(dir, "gone.ts"))).toBe("");
+      expect(read).not.toHaveBeenCalled();
+      expect(sidebar.readTurnAfterSide(present)).toBe("on disk\n");
+      expect(read).toHaveBeenCalledWith(present);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it.each(["status", "baseline", "disk"])("reports a %s read failure without opening misleading sides", async failure => {

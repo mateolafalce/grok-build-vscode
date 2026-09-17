@@ -10949,7 +10949,13 @@
         note.textContent = "Diff truncated — this preview is incomplete.";
         region.appendChild(note);
       }
-      if (!IS_REMOTE) {
+      // Only where there is a text diff to escape into. "No changes since this
+      // turn started" would open two identical sides, and a patch we could not
+      // parse (a binary file) would open two screens of mojibake — our sides
+      // are grok-diff: text documents, so VS Code's native image diff never
+      // applies. A truncated diff still has hunks, so the case this exists for
+      // keeps its button.
+      if (!IS_REMOTE && hunks.length) {
         const preview = document.createElement("button");
         preview.className = "preview-link";
         preview.textContent = "open diff →";

@@ -223,6 +223,26 @@ describe("one merged per-file turn diff inline in the card", () => {
     click(window, oldRow.nextElementSibling!.querySelector(".preview-link")!);
     expect(posted.at(-1)).toEqual({ type: "turnFileOpenDiff", turnId: "old-turn", cwd: "C:/repo", path: "dir/a.ts" });
   });
+
+  it.each([
+    { over: { patch: "" }, note: "No changes since this turn started." },
+    { over: { patch: "diff --git a/a.ts b/a.ts\nBinary files a/a.ts and b/a.ts differ\n" },
+      note: "No text diff available for this file." },
+  ])("offers no editor tab where there is no text diff to open: $note", ({ over, note }) => {
+    // The button promises the whole diff. With nothing parsed there is no whole
+    // diff: the first row would open two identical sides, and the second two
+    // screens of mojibake, since our sides are grok-diff: text documents rather
+    // than files and VS Code's native image diff never applies to them.
+    const { window, doc, posted } = bootWebview();
+    start(window, "turn");
+    edit(window, "a1");
+    click(window, rows(doc)[0]);
+    respond(window, posted.at(-1), over);
+    const region = rows(doc)[0].nextElementSibling!;
+    expect(region.textContent).toContain(note);
+    expect(region.querySelector(".preview-link")).toBeNull();
+    expect(posted.some(m => m.type === "turnFileOpenDiff")).toBe(false);
+  });
 });
 
 describe("a row with nothing to fall back to says why", () => {
