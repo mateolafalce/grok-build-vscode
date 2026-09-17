@@ -18965,7 +18965,11 @@
         break;
       case "permissionRequest":
         addPermissionCard(msg.req);
-        if (!state.replaying) {
+        // A card with no options cannot be answered, so nothing is waiting on
+        // anyone. A session-granted command (#61) arrives already resolved in
+        // one batch, and announcing a wait for it would be false on exactly the
+        // commands the grant exists to keep quiet.
+        if (!state.replaying && (msg.req.options || []).length > 0) {
           // Tool titles can expose commands or file operations. The accessibility
           // cue says what the user must do without reading tool details aloud.
           speakWaitingPrompt("Grok is waiting for your permission. Review the request and choose an option.");

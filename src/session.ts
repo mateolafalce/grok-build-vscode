@@ -27,8 +27,10 @@ export interface PendingPermission {
   toolKind?: string;
   /** Adapter plan-review text, when the permission carried one. */
   plan?: string;
-  /** Full option set offered by the CLI. */
+  /** Host-presented options, including a possible session command grant. */
   options: PendingPermissionOption[];
+  /** Host-only translation; the CLI must receive its one-time id, never ours. */
+  commandGrant?: { optionId: string; allowOnceId: string; programs: string[] };
   /** Subset safe to expose while the client-side Plan gate remains active. */
   planOptions: PendingPermissionOption[];
 }
@@ -67,7 +69,9 @@ export function preferredPermissionAllowOption(
   planActive: boolean,
 ): PendingPermissionOption | undefined {
   const options = pendingPermissionOptions(pending, planActive);
-  return options.find((option) => option.kind === "allow_always")
+  // Auto accept may answer pending cards, but only a deliberate card answer
+  // may create a program grant; the CLI also cannot interpret our option id.
+  return options.find((option) => option.kind === "allow_always" && option.optionId !== pending.commandGrant?.optionId)
     ?? options.find((option) => option.kind === "allow_once");
 }
 
@@ -94,6 +98,9 @@ export class Session {
 
   /** YOLO: auto-approve every permission request for this session. */
   autoApprove = false;
+
+  /** Explicit card grants only. Never serialized or inherited by a loaded session. */
+  readonly allowedCommandPrograms = new Set<string>();
 
   /** Plan-mode gate is up for this session (client-side enforcement mirror). */
   planActive = false;

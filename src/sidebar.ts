@@ -269,7 +269,7 @@ import {
   unreferencedUploadsForRemovedSessions,
 } from "./file-upload";
 import { MAX_DIFF_EXPAND_BYTES, expandDiffToWholeFile } from "./diff-view";
-import { applyAgentModeToHostPlan, effectivePlanActive, isPlanReviewPermission, permissionAnswerAllowed, permissionOptionsForPlan, pickRejectOption, planReviewVerdictForOption, planTextFromPermissionToolCall, shouldRejectPermission } from "./plan-gate";
+import { applyAgentModeToHostPlan, commandProgramsForGrant, effectivePlanActive, isPlanReviewPermission, permissionAnswerAllowed, permissionOptionsForPlan, pickRejectOption, planReviewVerdictForOption, planTextFromPermissionToolCall, shouldRejectPermission } from "./plan-gate";
 import { appendPlanEntry, planRestoreSource, truncateResolvedAfter, countsAsUserBubble, decideRestoreState, isInterjectionText } from "./plan-restore";
 import {
   planReviewFileName,
@@ -3988,9 +3988,51 @@ Only continue if you trust this code.`,
                   req.options.find((o) => o.kind === "allow_once");
       if (opt) { client.respondPermission(req.id, opt.optionId); return; }
     }
+    const execute = String(req.toolCall?.kind ?? "").toLowerCase() === "execute";
+    const command = (req.toolCall?.rawInput as { command?: unknown } | undefined)?.command;
+    const programs = execute && typeof command === "string"
+      ? commandProgramsForGrant(command, resolvedTerminalShellDialect()) : undefined;
+    const allowOnce = req.options.find((o) => o.kind === "allow_once");
+    // Every segment must be covered: an npm grant cannot smuggle in `&& rm`.
+    // is_background deliberately does not matter; it runs the same program.
+    if (!planActive && allowOnce && programs?.every((program) => session.allowedCommandPrograms.has(program))) {
+      if (client.respondPermission(req.id, allowOnce.optionId)) {
+        // The COMMAND, not `toolCall.title` -- grok's title for an execute card
+        // is often just "Shell", and what ran is the one thing this line exists
+        // to show. Reads after the collapsed card's verb, which is "Answered"
+        // because the card carries no option the renderer can name; nobody
+        // answered it, so the title is where the reason has to live too.
+        const title = `${command} — auto-approved for this session`;
+        session.pendingPermissions.set(req.id, createPendingPermission({
+          title, toolCallId: req.toolCall?.toolCallId, toolKind: req.toolCall?.kind,
+          options: [allowOnce],
+        }));
+        // Existing frames, delivered atomically. No actionable buttons or keyboard
+        // default, and no needs-you/human-wait transition, even for a remote.
+        this.emit(session, { type: "historyBatch", messages: [
+          { type: "permissionRequest", req: { ...req, toolCall: { ...req.toolCall, title }, options: [] } },
+          { type: "permissionResolved", requestId: req.id, optionId: allowOnce.optionId },
+        ] });
+        this.persistPermissionAnswer(session, req.id, allowOnce.optionId);
+        return;
+      }
+    }
+    // The card no longer offers "no, and never ask again"; execute cards also
+    // stop writing the CLI's exact-string grants (#123). The CLI and
+    // .grok/config.toml remain the route for either persistent policy.
+    const options = req.options.filter((o) => o.kind !== "reject_always" && (!execute || o.kind !== "allow_always"));
+    const ungranted = [...new Set(programs?.filter((program) => !session.allowedCommandPrograms.has(program)))];
+    let commandGrant;
+    if (allowOnce && ungranted.length > 0 && ungranted.length <= 3) {
+      // Namespacing plus a collision check keeps even an unfamiliar CLI id opaque.
+      let optionId = "grok-build:allow-command-session";
+      while (req.options.some((o) => o.optionId === optionId)) optionId += ":host";
+      commandGrant = { optionId, allowOnceId: allowOnce.optionId, programs: ungranted };
+      options.push({ optionId, kind: "allow_always", name: `Yes, and allow ${ungranted.map((p) => JSON.stringify(p)).join(", ")} this session` });
+    }
     // Remember it so the answer can be persisted for replay on resume.
     const visibleOptions = permissionOptionsForPlan(
-      req.options ?? [],
+      options,
       planActive,
       req.toolCall?.kind,
     );
@@ -4014,11 +4056,8 @@ Only continue if you trust this code.`,
       toolCallId: req.toolCall?.toolCallId,
       toolKind: req.toolCall?.kind,
       plan,
-      options: (req.options ?? []).map((o) => ({
-        optionId: o.optionId,
-        kind: o.kind,
-        name: o.name,
-      })),
+      options,
+      commandGrant,
     }));
     this.syncHumanWait(session);
     this.emit(session, {
@@ -9704,6 +9743,8 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       this.queueInFlightPlanCommentsOnExit(session, replacedClient, session.gen);
     }
     const gen = ++session.gen;
+    // Session objects can be reused for load/restart. Their grants cannot.
+    session.allowedCommandPrograms.clear();
     const testDelay = this.testSessionStartDelay;
     if (testDelay && testDelay.resumeId === resumeId) {
       this.testSessionStartDelay = undefined;
@@ -11281,7 +11322,9 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
             session.planActive,
             pending.toolKind,
           )) break;
-          if (!session.client?.respondPermission(msg.requestId, msg.optionId)) break;
+          const grant = pending.commandGrant?.optionId === msg.optionId ? pending.commandGrant : undefined;
+          if (!session.client?.respondPermission(msg.requestId, grant?.allowOnceId ?? msg.optionId)) break;
+          if (grant) for (const program of grant.programs) session.allowedCommandPrograms.add(program);
           // Record the resolution in the session buffer so re-focusing this session
           // replays the card collapsed instead of active (the live collapse is a
           // webview-only DOM mutation that the buffer never captured).

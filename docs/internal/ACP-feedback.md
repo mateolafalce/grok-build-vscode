@@ -712,8 +712,7 @@ client that can explain itself to the user and one that can only guess.
 **LIVE-VERIFIED 1.0.30 (2026-09-14)**, driving `grok agent stdio` directly against a
 throwaway project and logging every `session/request_permission`.
 
-`session/request_permission` for a terminal command offers four options, and we render them
-as given:
+`session/request_permission` for a terminal command offers four options:
 
     allow_always, allow_once, reject_once, reject_always
 
@@ -749,11 +748,19 @@ on the ACP path, and neither does `allow_bash_execute = true` — both edits sur
 file unrewritten and are simply not consulted here. So the field is real, it is not
 reachable from a client, and it is not reachable by the user either.
 
-**Client cost:** none available. The option list is the CLI's and its wording
-("don't ask again") is the CLI's; a client that substituted its own labels would drift the
-moment the CLI's changed, and would still be granting one string. The only honest thing we
-can do is tell the user this is how it works, which we have done on
-[#123](https://github.com/phuryn/grok-build-vscode/issues/123).
+**Client cost/workaround:** the host replaces execute `allow_always` with a
+session-scoped program grant and answers the CLI's real `allow_once`. Every
+shell segment must name an explicitly granted program; the existing Plan
+tokenizer fails closed on syntax it cannot safely decompose. The grant lives
+only on `Session`, is never persisted or inherited on load, and cannot approve
+anything while planning. Automatic answers stay visible as collapsed,
+persisted transcript cards. This addresses
+[#123](https://github.com/phuryn/grok-build-vscode/issues/123) and
+[#61](https://github.com/phuryn/grok-build-vscode/issues/61) without using the
+CLI's exact-string store. Cards also omit `reject_always` (#154); edits keep
+the CLI's useful path-keyed `allow_always`. Persistent allow/ask/deny policy
+remains the CLI's `.grok/config.toml` route. Relabelling the original CLI
+option alone could not fix its matching semantics; owning the session grant can.
 
 **Ask:** a fifth option kind that grants a family rather than a string — enough to populate
 `allowed_bash_globs`. The pattern could be the CLI's to choose (it already classifies the

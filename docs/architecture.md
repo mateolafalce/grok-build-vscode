@@ -435,6 +435,16 @@ cancel, or synthetic lifecycle.
   boundary for comment/revision cycles, with array-order inference for older entries. The webview
   keeps the raw CLI envelope for classification but strips it and `<user_query>`
   from the displayed/copied comment.
+  Execute permission cards replace the CLI's exact-command `allow_always` with a
+  host-owned grant for the literal program in every tokenized shell segment
+  (`commandProgramsForGrant`). `Session.allowedCommandPrograms` is memory-only,
+  starts empty on load/restart, and never crosses pool sessions. Matching requests
+  answer the CLI's `allow_once`, after the Plan and Auto accept branches; Plan
+  never consumes these grants. Auto-approved commands remain collapsed transcript
+  cards, labelled in their title and persisted through `persistPermissionAnswer`.
+  Cards omit `reject_always`; non-execute cards retain the CLI's `allow_always`.
+  Persistent policy remains CLI-owned in `.grok/config.toml`.
+
   Each `Session` owns a `pendingExitPlans` map keyed by the ACP request id. The host
   registers a request only after its async snapshot generation check, and an answer
   must find that exact entry. Gate changes happen before the JSON-RPC response so

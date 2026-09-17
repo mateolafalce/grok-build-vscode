@@ -276,6 +276,15 @@ describe("startSession bounded spawn retry", () => {
     startControl.disposes = 0;
   });
 
+  it.each([undefined, "saved-session"])("a new/load start (%s) clears grants even when reusing a Session object", async (resumeId) => {
+    const sidebar = makeSidebar("/repo");
+    const session = sidebar.focused;
+    session.allowedCommandPrograms.add("npm");
+    const client = await sidebar.startSession(resumeId, session);
+    expect(client).toBeDefined();
+    expect(session.allowedCommandPrograms.size).toBe(0);
+  });
+
   it("retries two transient spawn failures then comes up with no error", async () => {
     startControl.failuresRemaining = 2;
     const sidebar = makeSidebar("/repo");
