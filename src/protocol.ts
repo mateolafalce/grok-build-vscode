@@ -1375,6 +1375,7 @@ export type WebviewMsg =
   | { type: "gitFileDiff"; requestId?: string; cwd: string; path: string }
   /** The host resolves turnId to its captured base; clients cannot supply a ref. */
   | { type: "turnFileDiff"; requestId: string; turnId: string; cwd: string; path: string }
+  | { type: "turnFileOpenDiff"; turnId: string; cwd: string; path: string }
   /**
    * Changes view: run one of the four operations in the closed set.
    *
@@ -1521,7 +1522,7 @@ const WEBVIEW_MESSAGE_TYPE_MAP: Record<WebviewMsg["type"], true> = {
   clearAllSessions: true, pickFile: true, mentionQuery: true, addMentionFile: true,
   listProjectDir: true, readProjectFile: true, writeProjectFile: true,
   readProviderConfig: true, writeProviderConfig: true, restartProviderSession: true,
-  gitStatus: true, gitFileDiff: true, turnFileDiff: true, gitRun: true,
+  gitStatus: true, gitFileDiff: true, turnFileDiff: true, turnFileOpenDiff: true, gitRun: true,
   pasteImage: true, uploadFile: true, voiceStart: true,
   voiceStop: true, setVoiceBackend: true, configureOpenAiVoice: true, remoteVoiceStart: true, remoteVoiceChunk: true,
   remoteVoiceStop: true, queueSend: true, dequeueSend: true, clearQueuedSends: true,

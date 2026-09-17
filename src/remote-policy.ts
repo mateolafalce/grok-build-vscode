@@ -452,6 +452,7 @@ export const INBOUND_DISPOSITION: Record<WebviewMsg["type"], InboundDisposition>
   openUrl: "host-local",
   openText: "host-local",
   openDiff: "host-local",
+  turnFileOpenDiff: "host-local",
   exportExpr: "host-local",
   // Opens a native directory picker on the machine running the host. A remote
   // could neither see nor answer that dialog, so it would hang a phone on a
@@ -646,6 +647,7 @@ export const REMOTE_REQUIRES_BOUND_SESSION: Record<WebviewMsg["type"], boolean> 
   openUrl: false,
   openText: false,
   openDiff: false,
+  turnFileOpenDiff: false,
   exportExpr: false,
   addProjectFolder: false,
   removeProjectFolder: false,

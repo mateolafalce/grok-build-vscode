@@ -374,6 +374,9 @@ export function parseWebviewMsg(raw: unknown): WebviewMsg | null {
       if (!isString(raw.cwd) || !isString(raw.path)
         || !isString(raw.turnId) || !isString(raw.requestId)) return null;
       break;
+    case "turnFileOpenDiff":
+      if (!isString(raw.turnId) || !isString(raw.cwd) || !isString(raw.path)) return null;
+      break;
     case "gitRun":
       if (!isString(raw.cwd)) return null;
       if (!["commit", "push", "newBranch", "revertFile"].includes(raw.op as string)) return null;

@@ -291,7 +291,7 @@ import {
   resolveRemoteFileRoot,
   writeRemoteProjectFile,
 } from "./remote-files";
-import { GitRunGate, captureGitTurnBaseline, readGitFileDiff, readGitStatus, runGitPlan, type GitTurnBaseline } from "./git-run";
+import { GitRunGate, captureGitTurnBaseline, readGitFileDiff, readGitTurnFileBefore, readGitStatus, runGitPlan, type GitTurnBaseline } from "./git-run";
 import { describeGitFailure, isKnownChangedPath, planGitOp } from "./git-status";
 import {
   isCloudEnvironment,
@@ -12449,6 +12449,44 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         reply({ type: "turnFileDiffResult", ...correlation, ok: true, patch: diff.patch, truncated: diff.truncated });
         break;
       }
+      case "turnFileOpenDiff": {
+        const fail = (text: string) => this.post({ type: "error", text });
+        const rootResult = this.resolveGitRoot(msg.cwd, origin, clientId);
+        if (!rootResult.ok) { fail(rootResult.reason); break; }
+        const baseline = this.turnDiffBaselines.get(msg.turnId);
+        if (!baseline?.sha || !pathsEqual(baseline.root, rootResult.root)) {
+          fail("This turn's diff is no longer available.");
+          break;
+        }
+        const baselineBlob = baseline.untracked?.get(msg.path);
+        if (!baselineBlob) {
+          // Keep turnFileDiff's mapped-blob-or-live fence: staging a mapped
+          // file cannot revoke its baseline; other paths need fresh status.
+          const status = await readGitStatus(rootResult.root);
+          if (!status.ok) { fail(status.reason); break; }
+          if (!isKnownChangedPath(status.snapshot, msg.path)) {
+            fail("That file is no longer changed. Refresh and try again.");
+            break;
+          }
+        }
+        const before = await readGitTurnFileBefore(rootResult.root, msg.path, { sha: baseline.sha, untracked: baseline.untracked });
+        if (!before.ok) { fail(before.reason); break; }
+        const after = this.readFileForDiff(path.join(rootResult.root, msg.path));
+        if (after === undefined) {
+          // There is no region fallback here. An unreadable/oversized file
+          // must not masquerade as a whole-file deletion in a review tab.
+          fail("The current file could not be read for a diff. It may be missing or too large.");
+          break;
+        }
+        // The turnId is a randomUUID, so naming it here would spend 36
+        // characters of tab label on something no human can read, and push the
+        // filename out of the visible width -- losing the one word that says
+        // which tab this is. The price is that two tabs from different turns on
+        // one file look alike in the tab bar; their contents do not.
+        await this.openDiffTexts(session, msg.path, before.text, after,
+          `Turn diff: ${path.basename(msg.path)}`);
+        break;
+      }
       case "gitRun": {
         const correlation = typeof msg.requestId === "string" ? { requestId: msg.requestId } : {};
         const op = msg.op;
@@ -15576,7 +15614,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     replaceAll?: boolean,
     sites?: { oldText: string; newText: string; oldLine?: number; newLine?: number }[],
   ): Promise<void> {
-    const base = path.basename(filePath);
     // grok's diff block carries only the replaced region, which opens as a
     // context-free two-line tab. Expand it against the file on disk so the tab
     // shows the whole file and lands on the change (#66); a pending permission
@@ -15589,13 +15626,30 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       replaceAll,
       sites,
     });
+    await this.openDiffTexts(session, filePath, sides.oldText, sides.newText,
+      `Grok proposed: ${path.basename(filePath)}`, sides.firstChangedLine, requestId);
+  }
+
+  // Both callers own complete sides at this point. Turn diffs must bypass
+  // region expansion (and its second disk read), and carry no permission id:
+  // their tabs belong to the user, not a card's automatic cleanup lifecycle.
+  private async openDiffTexts(
+    session: Session,
+    filePath: string,
+    oldText: string,
+    newText: string,
+    title: string,
+    at = 0,
+    requestId?: number | string,
+  ): Promise<void> {
+    const base = path.basename(filePath);
     // Unique key per diff so sequential edits to the same file don't collide on
     // the content map. The trailing real filename gives VS Code the language.
     const key = String(this.diffSeq++);
     const left = Uri.from({ scheme: GROK_DIFF_SCHEME, path: `/${key}/before/${base}` });
     const right = Uri.from({ scheme: GROK_DIFF_SCHEME, path: `/${key}/after/${base}` });
-    this.diffProvider.set(left, sides.oldText);
-    this.diffProvider.set(right, sides.newText);
+    this.diffProvider.set(left, oldText);
+    this.diffProvider.set(right, newText);
     if (requestId !== undefined) {
       // Auto-open is per pending permission; remember the URIs so the matching
       // tab can be closed (and its content dropped) once the user decides (#21).
@@ -15628,8 +15682,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     // preserveFocus:true keeps focus on the chat so the permission card is
     // immediately clickable. `selection` opens a whole-file diff on the edit
     // instead of at line 1 (#66) — harmless at 0 when expansion fell back.
-    const at = sides.firstChangedLine;
-    await this.host.openDiff(left, right, `Grok proposed: ${base}`, {
+    await this.host.openDiff(left, right, title, {
       preview: false,
       preserveFocus: true,
       selection: {
@@ -15640,10 +15693,11 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
   }
 
   /**
-   * The file's current content, for whole-file diff expansion (#66). Undefined
+   * The file's current content, for native diff readers. Undefined
    * when it can't be read — a create whose file doesn't exist yet, a file
    * deleted since, or one too big to hold twice — which leaves the diff at the
-   * region-only fallback rather than failing the open.
+   * region-only fallback for a per-edit preview (#66). A turn diff has no
+   * trustworthy region to fall back to and reports the failed read instead.
    */
   private readFileForDiff(filePath: string): string | undefined {
     try {

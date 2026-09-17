@@ -25,6 +25,7 @@ import {
   captureGitTurnBaseline,
   GitRunGate,
   readGitFileDiff,
+  readGitTurnFileBefore,
   readGitStatus,
   runGit,
   runGitPlan,
@@ -85,6 +86,29 @@ function fakeIo(replies: Record<string, FakeReply>, seen?: string[][]): GitIo {
   }) as unknown as GitIo["execFile"];
   return { execFile: impl };
 }
+
+describe("whole-file turn baseline read failures", () => {
+  const baseline = { sha: "a".repeat(40) };
+  it.each([
+    { code: 128, stderr: "tree unavailable" },
+    { code: 1, stdout: "partial tree", stderr: "read interrupted" },
+    { code: 0, stderr: "tree diagnostic" },
+    { enoent: true },
+  ])("never classifies a failed tree lookup as a turn-created file: %j", async reply => {
+    const seen: string[][] = [];
+    const result = await readGitTurnFileBefore("/repo", "a.ts", baseline,
+      { io: fakeIo({ "--literal-pathspecs": reply }, seen) });
+    expect(result).toMatchObject({ ok: false, reason: expect.any(String) });
+    expect(seen).toHaveLength(1);
+  });
+  it.each([false, true])("rejects partial whole-file stdout, unlike no-index patches (blob=%s)", async blob => {
+    const result = await readGitTurnFileBefore("/repo", "a.ts",
+      { ...baseline, ...(blob ? { untracked: new Map([["a.ts", "b".repeat(40)]]) } : {}) },
+      { io: fakeIo({ "--literal-pathspecs": { stdout: "tree entry\0" },
+        [blob ? "cat-file" : "show"]: { code: 1, stdout: "partial text", stderr: "buffer limit" } }) });
+    expect(result).toEqual({ ok: false, reason: "buffer limit" });
+  });
+});
 
 describe("runGit", () => {
   it("classifies an asynchronous stdin error instead of accepting partial input", async () => {
@@ -321,6 +345,43 @@ afterAll(() => {
 });
 
 describe.runIf(gitAvailable !== false)("readGitStatus against real git", () => {
+  it.each(["tracked", "untracked", "created"] as const)("reads the complete %s before-side without changing the index or refs", async kind => {
+    const root = await makeRepo(`turn-editor-${kind}`);
+    const name = kind === "tracked" ? "README.md" : "new.txt";
+    const file = path.join(root, name);
+    const oldText = kind === "created" ? "" : Array.from({ length: 900 }, (_, i) => `before ${i}\n`).join("");
+    if (kind !== "created") fs.writeFileSync(file, oldText);
+    const baseline = await captureGitTurnBaseline(root);
+    expect(baseline).toBeDefined();
+    const newText = Array.from({ length: 900 }, (_, i) => `after ${i}\n`).join("");
+    fs.writeFileSync(file, newText);
+    // New and pre-existing untracked files may have been staged by click time.
+    if (kind !== "tracked") await git(root, "add", "--", name);
+    const index = fs.readFileSync(path.join(root, ".git", "index"));
+    const refs = await git(root, "show-ref");
+    const { io, calls } = observedGit();
+    expect(await readGitTurnFileBefore(root, name, baseline!, { io })).toEqual({ ok: true, text: oldText });
+    expect(fs.readFileSync(file, "utf8")).toBe(newText);
+    expect(fs.readFileSync(path.join(root, ".git", "index"))).toEqual(index);
+    expect(await git(root, "show-ref")).toBe(refs);
+    expect(calls.map(args => args.slice(2))).toEqual(kind === "untracked"
+      ? [["cat-file", "blob", baseline!.untracked!.get(name)!]]
+      : [["--literal-pathspecs", "ls-tree", "-z", "--full-tree", baseline!.sha, "--", name],
+        ...(kind === "tracked" ? [["show", `${baseline!.sha}:${name}`]] : [])]);
+  });
+
+  it("uses literal tree paths and object names even when brackets match another file", async () => {
+    const root = await makeRepo("turn-editor-literal");
+    for (const name of ["a[1].txt", "a1.txt", "a2.txt"]) fs.writeFileSync(path.join(root, name), name + "\n");
+    await git(root, "add", "-A");
+    await git(root, "commit", "-m", "literal filenames");
+    const baseline = await captureGitTurnBaseline(root);
+    expect(await readGitTurnFileBefore(root, "a[1].txt", baseline!)).toEqual({ ok: true, text: "a[1].txt\n" });
+    expect(await readGitTurnFileBefore(root, "a[2].txt", baseline!)).toEqual({ ok: true, text: "" });
+    expect(await readGitTurnFileBefore(root, "new.txt", { sha: "f".repeat(40) }))
+      .toMatchObject({ ok: false, reason: expect.any(String) });
+  });
+
   it("captures pre-existing staged and unstaged edits without changing the index, files or stash ref", async () => {
     const root = await makeRepo("turn-baseline");
     const file = path.join(root, "README.md");

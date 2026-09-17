@@ -10949,6 +10949,19 @@
         note.textContent = "Diff truncated — this preview is incomplete.";
         region.appendChild(note);
       }
+      if (!IS_REMOTE) {
+        const preview = document.createElement("button");
+        preview.className = "preview-link";
+        preview.textContent = "open diff →";
+        preview.onclick = (e) => {
+          e.stopPropagation();
+          // Only the host has the whole sides. previewInApp's renderer-owned
+          // texts would reconstruct a lie from this capped patch; Electron's
+          // host.openDiff can open the full texts in its native viewer instead.
+          vscode.postMessage({ type: "turnFileOpenDiff", turnId: baseline.turnId, cwd: baseline.cwd, path });
+        };
+        region.appendChild(preview);
+      }
     };
     const timer = setTimeout(() => finish({ ok: false }), 60000);
     turnFileDiffPending.set(requestId, { request, finish });

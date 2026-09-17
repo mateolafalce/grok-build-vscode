@@ -173,6 +173,25 @@ describe("parsed patch rows become the existing inline hunk shape", () => {
 });
 
 describe("turn diff remote policy", () => {
+  const openRequest = { type: "turnFileOpenDiff" as const, turnId: "turn", cwd: "/repo", path: "a.ts" };
+  it("keeps whole-file turn diff editors host-local in both policy registries", () => {
+    expect(INBOUND_DISPOSITION.turnFileOpenDiff).toBe("host-local");
+    expect(REMOTE_REQUIRES_BOUND_SESSION.turnFileOpenDiff).toBe(false);
+  });
+  it("keeps whole-file turn diff editors host-local at every remote tier", () => {
+    for (const tier of ["view", "propose", "full"] as const) {
+      expect(allowFromRemote("turnFileOpenDiff", tier)).toBe(false);
+      expect(allowFromRemote("turnFileOpenDiff", tier, { isCloud: true })).toBe(false);
+    }
+  });
+  it("validates the local editor request without accepting missing or non-string fields", () => {
+    expect(parseWebviewMsg(openRequest)).toEqual(openRequest);
+    for (const key of ["turnId", "cwd", "path"]) {
+      for (const value of [undefined, null, 12, {}, []]) {
+        expect(parseWebviewMsg({ ...openRequest, [key]: value })).toBeNull();
+      }
+    }
+  });
   const request = { type: "turnFileDiff" as const, turnId: "turn", requestId: "request", cwd: "/repo", path: "a.ts" };
   const same = (a: string, b: string) => a === b;
   it("validates the new desktop request type and requires identity and correlation", () => {

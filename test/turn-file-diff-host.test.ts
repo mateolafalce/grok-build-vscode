@@ -3,6 +3,8 @@ import { GrokSidebar } from "../src/sidebar";
 import { Session, beginTurn } from "../src/session";
 import * as git from "../src/git-run";
 import { emptyGitStatus } from "../src/git-status";
+import { SessionRequestState } from "../src/session-request-state";
+import path from "node:path";
 
 const SHA = "b".repeat(40);
 const BLOB = "c".repeat(40);
@@ -100,6 +102,103 @@ describe("host-owned turn baselines", () => {
     await settle();
     expect(sidebar.gitRunGate.isBusy("/repo")).toBe(false);
     expect([...sidebar.turnDiffBaselines.values()][0].sha).toBeUndefined();
+  });
+});
+
+describe("host-local whole-file turn diff tabs", () => {
+  function openFixture() {
+    const { sidebar, session } = fixture();
+    sidebar.host.openDiff = vi.fn().mockResolvedValue(undefined);
+    sidebar.host.closeDiffTabs = vi.fn();
+    sidebar.diffSeq = 0;
+    sidebar.diffProvider = { set: vi.fn(), delete: vi.fn() };
+    sidebar.openDiffsByRequest = new SessionRequestState();
+    const remember = vi.spyOn(sidebar.openDiffsByRequest, "set");
+    sidebar.turnDiffBaselines.set("turn", { root: "/repo", sha: SHA });
+    const status = vi.spyOn(git, "readGitStatus").mockResolvedValue({ ok: true, snapshot: {
+      ...emptyGitStatus(), files: [{ path: "a.ts", status: "M", added: 900, deleted: 900 }],
+    } });
+    const oldText = "before\n".repeat(900);
+    const newText = "after\n".repeat(900);
+    const before = vi.spyOn(git, "readGitTurnFileBefore").mockResolvedValue({ ok: true, text: oldText });
+    const disk = vi.spyOn(sidebar, "readFileForDiff").mockReturnValue(newText);
+    const request = { type: "turnFileOpenDiff", turnId: "turn", cwd: "/repo", path: "a.ts" };
+    return { sidebar, session, remember, before, disk, status, request, oldText, newText };
+  }
+
+  it("opens complete sides once in a permanent tab owned by the user, not a permission", async () => {
+    const { sidebar, session, remember, before, disk, request, oldText, newText } = openFixture();
+    await sidebar.onMessage({ ...request, requestId: 7, baseline: "evil", oldText: "capped patch" }, "local");
+    expect(before).toHaveBeenCalledWith("/repo", "a.ts", { sha: SHA, untracked: undefined });
+    expect(disk).toHaveBeenCalledTimes(1);
+    expect(disk).toHaveBeenCalledWith(path.join("/repo", "a.ts"));
+    const [left, right, title, options] = sidebar.host.openDiff.mock.calls[0];
+    expect(left.scheme).toBe("grok-diff");
+    expect(right.scheme).toBe("grok-diff");
+    expect(sidebar.diffProvider.set.mock.calls).toEqual([[left, oldText], [right, newText]]);
+    // Names the file, not the turn: a real turnId is a randomUUID, and this
+    // fixture's four-character one is what hid that from the first version.
+    expect(title).toBe("Turn diff: a.ts");
+    expect(options).toMatchObject({ preview: false });
+    expect(remember).not.toHaveBeenCalled();
+    expect(sidebar.sendRemoteRequester).not.toHaveBeenCalled();
+    expect(sidebar.post).not.toHaveBeenCalled();
+
+    // Exercise the actual answer path, including closing a different tab.
+    await sidebar.openDiffEditor(session, "permission.ts", "old", "new", 7);
+    const [permissionLeft, permissionRight] = sidebar.host.openDiff.mock.calls[1];
+    session.pendingPermissions.set(7, { title: "Edit permission.ts", options: [{ optionId: "yes", kind: "allow_once", name: "Allow" }], toolKind: "edit" });
+    session.client = { respondPermission: vi.fn().mockReturnValue(true) } as any;
+    sidebar.persistPermissionAnswer = vi.fn();
+    sidebar.noteAnswered = vi.fn();
+    await sidebar.onMessage({ type: "permissionAnswer", requestId: 7, optionId: "yes" }, "local");
+    expect(session.client.respondPermission).toHaveBeenCalledWith(7, "yes");
+    expect(sidebar.host.closeDiffTabs).toHaveBeenCalledTimes(1);
+    expect(sidebar.host.closeDiffTabs).toHaveBeenCalledWith(permissionLeft, permissionRight);
+    expect(sidebar.diffProvider.delete).toHaveBeenCalledTimes(1);
+    expect(sidebar.diffProvider.delete).toHaveBeenCalledWith(permissionLeft, permissionRight);
+    expect(String(permissionLeft)).not.toBe(String(left));
+    expect(String(permissionRight)).not.toBe(String(right));
+  });
+
+  it("uses a mapped baseline without the live status fence even after staging or deletion", async () => {
+    const { sidebar, before, status, request } = openFixture();
+    const untracked = new Map([["a.ts", BLOB]]);
+    sidebar.turnDiffBaselines.get("turn").untracked = untracked;
+    await sidebar.onMessage({ ...request, baselineBlob: "evil" }, "local");
+    expect(status).not.toHaveBeenCalled();
+    expect(before).toHaveBeenCalledWith("/repo", "a.ts", { sha: SHA, untracked });
+    expect(sidebar.host.openDiff).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([{ turnId: "expired" }, { turnId: SHA }, { cwd: "/other" }, { path: "unknown.ts" }, { path: "../secret" }])(
+    "refuses a request outside the turn/root/changed-path fences with a sentence: %j", async over => {
+      const { sidebar, before, disk, request } = openFixture();
+      await sidebar.onMessage({ ...request, ...over }, "local");
+      expect(before).not.toHaveBeenCalled();
+      expect(disk).not.toHaveBeenCalled();
+      expect(sidebar.host.openDiff).not.toHaveBeenCalled();
+      expect(sidebar.post).toHaveBeenCalledWith({ type: "error", text: expect.stringMatching(/\S.+/) });
+    });
+
+  it.each([{ root: "/repo" }, { root: "/other", sha: SHA }])("refuses unfinished or differently rooted baselines: %j", async baseline => {
+    const { sidebar, before, status, request } = openFixture();
+    sidebar.turnDiffBaselines.set("turn", baseline);
+    await sidebar.onMessage(request, "local");
+    expect(status).not.toHaveBeenCalled();
+    expect(before).not.toHaveBeenCalled();
+    expect(sidebar.host.openDiff).not.toHaveBeenCalled();
+    expect(sidebar.post).toHaveBeenCalledWith({ type: "error", text: "This turn's diff is no longer available." });
+  });
+
+  it.each(["status", "baseline", "disk"])("reports a %s read failure without opening misleading sides", async failure => {
+    const { sidebar, status, before, disk, request } = openFixture();
+    if (failure === "status") status.mockResolvedValue({ ok: false, reason: "Status failed.", kind: "failed" });
+    if (failure === "baseline") before.mockResolvedValue({ ok: false, reason: "Baseline failed." });
+    if (failure === "disk") disk.mockReturnValue(undefined);
+    await sidebar.onMessage(request, "local");
+    expect(sidebar.host.openDiff).not.toHaveBeenCalled();
+    expect(sidebar.post).toHaveBeenCalledWith({ type: "error", text: expect.stringMatching(/\S.+[.!]$/) });
   });
 });
 

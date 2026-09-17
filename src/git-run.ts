@@ -310,6 +310,37 @@ export async function readGitFileDiff(
   };
 }
 
+/** Whole before-side text for a host-local turn diff; never derived from a capped patch. */
+export async function readGitTurnFileBefore(
+  root: string,
+  path: string,
+  baseline: GitTurnBaseline,
+  opts?: { io?: GitIo; env?: NodeJS.ProcessEnv },
+): Promise<{ ok: true; text: string } | { ok: false; reason: string }> {
+  const fail = (result: GitExecResult) => ({
+    ok: false as const,
+    reason: result.spawnFailed ? "Git is not installed on this machine."
+      : firstLine(result.stderr) || "Could not read this file's turn baseline.",
+  });
+  const blob = baseline.untracked?.get(path);
+  if (!blob) {
+    // A failed `show sha:path` cannot distinguish a new file from a broken
+    // baseline without parsing prose. ls-tree's successful empty listing can;
+    // a non-zero exit (even with stdout) or diagnostic must never mean empty.
+    const entry = await runGit(root, ["--literal-pathspecs", "ls-tree", "-z", "--full-tree", baseline.sha, "--", path], opts);
+    if (!entry.ok || entry.stderr) return fail(entry);
+    if (!entry.stdout) return { ok: true, text: "" };
+  }
+  // <rev>:<path> names one object, not a pathspec (gitrevisions). Brackets and
+  // wildcard characters are literal here, unlike ls-tree's path operand above.
+  const result = await runGit(root, blob
+    ? ["cat-file", "blob", blob] : ["show", `${baseline.sha}:${path}`], opts);
+  // Unlike --no-index diff, these reads require exit 0: partial stdout on a
+  // timeout/buffer failure is not a whole file and must not reach the editor.
+  if (!result.ok) return fail(result);
+  return { ok: true, text: result.stdout };
+}
+
 export interface GitRunOutcome {
   ok: boolean;
   /** Index of the step that failed, or -1 when every step succeeded. */

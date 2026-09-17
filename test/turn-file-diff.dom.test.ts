@@ -184,8 +184,8 @@ describe("one merged per-file turn diff inline in the card", () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it("shares the 400-line budget across patch hunks without promising a native editor", () => {
-    const { window, doc, posted } = bootWebview();
+  it.each([false, true])("shares the 400-line budget and offers the whole diff only on a desk (remote=%s)", remote => {
+    const { window, doc, posted } = bootWebview({ remote });
     start(window, "turn");
     edit(window, "a1");
     click(window, rows(doc)[0]);
@@ -196,7 +196,32 @@ describe("one merged per-file turn diff inline in the card", () => {
     expect(region.querySelectorAll(".tdl")).toHaveLength(400);
     expect(region.textContent).toContain("second");
     expect(region.textContent).toContain("100 more line(s) — preview limit reached");
-    expect(region.textContent).not.toContain("open diff");
+    // The cap is why the desk needs an escape hatch. A phone has no editor,
+    // so it must never offer a host-local action that the relay will drop.
+    if (remote) {
+      expect(region.querySelector(".preview-link")).toBeNull();
+      expect(region.textContent).not.toContain("open diff");
+    } else {
+      expect(region.textContent).toContain("open diff →");
+      click(window, region.querySelector(".preview-link")!);
+      expect(posted.at(-1)).toEqual({ type: "turnFileOpenDiff", turnId: "turn", cwd: "/repo", path: "a.ts" });
+      expect(region.isConnected).toBe(true);
+    }
+  });
+
+  it.each([false, true])("opens even a short diff through the host with its original turn and cwd (previewInApp=%s)", previewInApp => {
+    const { window, doc, posted } = bootWebview({ vscode: !previewInApp });
+    dispatch(window, { type: "initialState", capabilities: { previewInApp } });
+    start(window, "old-turn", "C:/repo");
+    edit(window, "old-edit", "C:/repo/dir/a.ts");
+    dispatch(window, { type: "agentEnd" });
+    const oldRow = rows(doc)[0];
+    start(window, "new-turn", "C:/other");
+    edit(window, "new-edit");
+    click(window, oldRow);
+    respond(window, posted.at(-1));
+    click(window, oldRow.nextElementSibling!.querySelector(".preview-link")!);
+    expect(posted.at(-1)).toEqual({ type: "turnFileOpenDiff", turnId: "old-turn", cwd: "C:/repo", path: "dir/a.ts" });
   });
 });
 
