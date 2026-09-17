@@ -47,7 +47,27 @@ describe("parseRunProgressUpdate — workflow", () => {
       displayName: "deep-research-2",
     });
     expect(u?.detail).toMatch(/agent_started/);
-    expect(u?.progress).toBeCloseTo(4 / 128);
+    // Spend is reported as spend. `progress` is the completion slot the card
+    // prints as a bare `%`, and a workflow has no completion number to put in
+    // it — putting agents_used/agent_budget there is what #163 reported.
+    expect(u?.progress).toBeUndefined();
+    expect(u?.agentsUsed).toBe(4);
+    expect(u?.agentBudget).toBe(128);
+    expect(u?.detail).toMatch(/4\/128 agents/);
+  });
+
+  it("omits the agent count when the run reports no budget", () => {
+    const u = parseRunProgressUpdate({
+      sessionUpdate: "workflow_updated",
+      run_id: "run-nobudget",
+      display_name: "review-changes",
+      current_phase: "running",
+      last_event: "agent_started",
+      agents_used: 2,
+    });
+    expect(u?.progress).toBeUndefined();
+    expect(u?.agentBudget).toBeUndefined();
+    expect(u?.detail).toBe("agent_started");
   });
 
   it("marks completed / failed / cancelled terminal", () => {

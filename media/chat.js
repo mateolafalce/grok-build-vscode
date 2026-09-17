@@ -13559,6 +13559,22 @@
     el.classList.toggle("run-progress-cancelled", !!update.cancelled && !update.failed);
     el.classList.toggle("run-progress-done", !!update.done);
 
+    // How long this run has been going, in the row beside the phase.
+    //
+    // A workflow reports no completion fraction at all now (see
+    // src/run-progress.ts), so without this the row holds nothing that moves
+    // while one agent works for twenty minutes — and "still going" reads
+    // exactly like "wedged", which is half of #163. It is the same counter the
+    // waiting indicator uses, and it stops itself when the node is detached.
+    //
+    // Not armed while a loaded session is replaying: the only clock available
+    // there starts now, so a restored run would claim to have begun at the
+    // moment the conversation was opened. On `done` the interval stops and the
+    // last value stays as the run's duration.
+    const row = el.querySelector(".run-progress-row");
+    if (update.done) clearWaitElapsed(row);
+    else if (row && !row._waitTimer && !state.replaying) armWaitElapsed(row, "run-progress-elapsed");
+
     const dots = el.querySelector(".blink-dots");
     if (update.done) {
       if (dots) dots.remove();
@@ -14178,8 +14194,19 @@
   // state-keyed timer would stop counting a wait the user is still looking at.
   // It also stops itself once the node is detached, so any path that removes
   // the indicator — not just hideGrokking — cleans up.
-  function armWaitElapsed(el) {
-    el._waitStart = Date.now();
+  //
+  // `cls` names the span so a second caller can use the same timer without a
+  // second implementation: the run-progress card has the identical problem one
+  // level up (#163 — a workflow that sits on one number for an hour is
+  // indistinguishable from a dead one), and it wants the readout inside its own
+  // row rather than at the end of a label. An existing `_waitStart` is kept, so
+  // re-arming a node that is already counting continues its clock instead of
+  // restarting it — a resumed run has not been running for zero seconds.
+  function armWaitElapsed(el, cls) {
+    if (!el) return;
+    clearWaitElapsed(el);
+    const klass = cls || "grokking-elapsed";
+    if (!el._waitStart) el._waitStart = Date.now();
     // Painted at once and then every second, with NO threshold to cross.
     //
     // A delay was the first design and it was wrong twice over. It guaranteed
@@ -14194,10 +14221,10 @@
         clearWaitElapsed(el);
         return;
       }
-      let out = el.querySelector(".grokking-elapsed");
+      let out = el.querySelector("." + klass);
       if (!out) {
         out = document.createElement("span");
-        out.className = "grokking-elapsed";
+        out.className = klass;
         // The verb is already announced. A value that changes every second
         // would otherwise be read out every second.
         out.setAttribute("aria-hidden", "true");

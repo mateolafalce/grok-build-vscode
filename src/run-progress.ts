@@ -36,8 +36,21 @@ export interface RunProgressUpdate {
   phase: string;
   /** One-line status (last_event + detail, deliverable title, …). */
   detail?: string;
-  /** 0–1 progress when known (deliverables completed/total, etc.). */
+  /**
+   * 0–1 COMPLETION when known — goals only.
+   *
+   * Deliberately absent for workflows. A workflow's only fraction on the wire
+   * is `agents_used / agent_budget`, which is money spent, not work finished
+   * (#163: *"Grok tells me the progress is never accurate"* — it was right).
+   * The renderer prints this as a bare `%` beside the phase, in the same slot
+   * for both kinds, so a spend fraction here reads as a finish line. The spend
+   * still reaches the card, as {@link agentsUsed} / {@link agentBudget} and a
+   * labelled `N/M agents` in {@link detail} — a number that says what it is.
+   */
   progress?: number;
+  /** Workflow agent spend, when the run reports it. Never a completion ratio. */
+  agentsUsed?: number;
+  agentBudget?: number;
   /** True when the run is finished (success, fail, cancel, clear). */
   done: boolean;
   failed: boolean;
@@ -140,11 +153,16 @@ function parseWorkflow(u: Record<string, unknown>, sessionUpdate: string): RunPr
   else if (lastEvent) detailParts.push(lastDetail ? `${lastEvent}: ${lastDetail}` : lastEvent);
   else if (agentLabel) detailParts.push(agentLabel);
 
+  // Spend, and it is reported as spend. `agents_used / agent_budget` used to
+  // become `progress` here, which the card then drew as a percentage in the
+  // same place the Goal card draws real completion — so "strategy 2%" meant
+  // "one agent of fifty gone", and a run doing long work inside one agent sat
+  // at the same number for an hour (#163). Reported as `N/M agents` instead:
+  // the same fact, in a form that cannot be read as a finish line.
   const agentsUsed = num(u.agents_used ?? u.agentsUsed);
   const agentBudget = num(u.agent_budget ?? u.agentBudget);
-  let progress: number | undefined;
   if (agentsUsed != null && agentBudget != null && agentBudget > 0) {
-    progress = Math.min(1, Math.max(0, agentsUsed / agentBudget));
+    detailParts.push(`${agentsUsed}/${agentBudget} agents`);
   }
 
   const done = DONE_PHASES.has(phase) || /completed|failed|cancelled|stopped/.test(sessionUpdate);
@@ -158,7 +176,8 @@ function parseWorkflow(u: Record<string, unknown>, sessionUpdate: string): RunPr
     subtitle: objective,
     phase,
     detail: detailParts.join(" · ") || undefined,
-    progress,
+    agentsUsed,
+    agentBudget,
     done: done || failed || cancelled,
     failed,
     cancelled,
