@@ -75,6 +75,59 @@ describe("parseRunProgressUpdate — workflow", () => {
     expect(u?.detail).toBe("Agent started");
   });
 
+  describe("status is the lifecycle, current_phase is the position within it", () => {
+    // Measured live: pausing and stopping a run change `status` and leave
+    // `current_phase` alone, and the discriminator stays `workflow_updated`
+    // for all three states. Reading the position first is what made Pause
+    // look like it had done nothing.
+    const at = (over: Record<string, unknown>) =>
+      parseRunProgressUpdate({
+        sessionUpdate: "workflow_updated",
+        run_id: "run-real",
+        name: "deep-research",
+        agents_used: 1,
+        agent_budget: 128,
+        current_phase: "Plan",
+        ...over,
+      });
+
+    it("prefers the position while the run is merely active", () => {
+      // "Plan" tells the reader more than "active" does, so `active` must NOT
+      // count as a lifecycle word.
+      expect(at({ status: "active" })?.phase).toBe("plan");
+    });
+
+    it("prefers the lifecycle once the run is paused or stopped", () => {
+      expect(at({ status: "user_paused" })?.phase).toBe("user_paused");
+      const stopped = at({ status: "cancelled" });
+      expect(stopped?.phase).toBe("cancelled");
+      expect(stopped?.cancelled).toBe(true);
+      expect(stopped?.done).toBe(true);
+    });
+
+    it("does not mistake a pause for a finish", () => {
+      const paused = at({ status: "user_paused" });
+      expect(paused?.done).toBe(false);
+      expect(paused?.failed).toBe(false);
+      expect(paused?.cancelled).toBe(false);
+    });
+
+    it("catches lifecycle words we have not seen, on their stems", () => {
+      // The CLI's own vocabulary nearby: budget_limited, interrupted, failed.
+      // Each must outrank the position the same way a measured one does.
+      for (const status of ["budget_limited", "workflow_interrupted", "failed", "agent_paused"]) {
+        expect(at({ status })?.phase, status).toBe(status);
+      }
+    });
+
+    it("still falls back when no status arrives at all", () => {
+      expect(at({ status: undefined })?.phase).toBe("plan");
+      expect(parseRunProgressUpdate({
+        sessionUpdate: "workflow_updated", run_id: "r", name: "deep-research",
+      })?.phase).toBe("updated");
+    });
+  });
+
   // The owner, reading a card built from real captured frames: "phase_entered?
   // Can't we translate those labels? Is this the only one?" No, it was not —
   // the phase word leaks the same way, and that half is fixed at the render
@@ -110,8 +163,25 @@ describe("parseRunProgressUpdate — workflow", () => {
       })).toBe("research plan: 3 question(s), capped at 4 · 4/128 agents");
     });
 
-    it("labels a bare `workflow_started`, which carries no detail at all", () => {
-      expect(detailOf({ status: "active", last_event: "workflow_started" })).toBe("Started · 4/128 agents");
+    it("says nothing for a lifecycle event the phase slot already carries", () => {
+      // `workflow_started` beside a row reading `· active`, and
+      // `workflow_cancelled` beside one reading `· cancelled`: in both the
+      // event name is the row's job, so the detail is the spend alone.
+      expect(detailOf({ status: "active", last_event: "workflow_started" })).toBe("4/128 agents");
+      expect(detailOf({ status: "cancelled", last_event: "workflow_cancelled" })).toBe("4/128 agents");
+    });
+
+    it("keeps a lifecycle event's prose, and drops its bare reason token", () => {
+      // The CLI explains a failure in a sentence — that must survive. A pause
+      // reason is a single word the row has already said.
+      expect(detailOf({
+        status: "budget_exceeded", last_event: "workflow_failed",
+        last_event_detail: "maximum agent budget reached; start a new run",
+      })).toBe("maximum agent budget reached; start a new run · 4/128 agents");
+      expect(detailOf({
+        status: "user_paused", current_phase: "Plan",
+        last_event: "workflow_paused", last_event_detail: "user",
+      })).toBe("Plan · 4/128 agents");
     });
 
     it("sentence-cases a name nobody predicted, rather than shipping Rust", () => {

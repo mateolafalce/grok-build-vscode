@@ -38,9 +38,19 @@ const EVENT_LABEL: Record<string, string> = {
   log: "",
   phase_entered: "",
   phase_transition: "",
-  workflow_started: "Started",
-  workflow_paused: "Paused",
-  workflow_resumed: "Resumed",
+  // Every `workflow_*` lifecycle event is already the phase slot's business
+  // now that `status` outranks `current_phase`, so the name adds nothing here.
+  // Their DETAILS still come through when they carry something: a bare reason
+  // token like `user` is dropped by the containment rule below (the row says
+  // "user paused"), while `workflow_failed`'s prose — the CLI has sentences
+  // like "maximum agent budget reached; start a new run" — survives it.
+  workflow_started: "",
+  workflow_paused: "",
+  workflow_resumed: "",
+  workflow_completed: "",
+  workflow_cancelled: "",
+  workflow_failed: "",
+  workflow_interrupted: "",
   agent_spawned: "Agent started",
   agent_finished: "Agent finished",
   agent_completed: "Agent finished",
@@ -77,6 +87,16 @@ function eventLabel(name: string): string {
  * in this file would mean either breaking those comparisons or carrying two
  * spellings of the same field across the wire.
  */
+
+/**
+ * Status words that describe the RUN's lifecycle rather than its position.
+ * Observed live: `active`, `user_paused`, `cancelled`. The rest come from the
+ * CLI's own vocabulary in the same module (`workflow_budget_limited`,
+ * `workflow_interrupted`, `workflow_failed`, `workflow_completed`), matched on
+ * stems so a prefix we have not seen — `agent_paused`, `budget_exceeded` —
+ * still lands on the right side of the line.
+ */
+const LIFECYCLE_STATUS = /paus|cancel|stopp|stopped|complet|fail|error|interrupt|budget|abort/;
 
 /** Terminal-ish phases that stop the live dots. */
 const DONE_PHASES = new Set([
@@ -197,15 +217,40 @@ function parseWorkflow(u: Record<string, unknown>, sessionUpdate: string): RunPr
   const runId = str(u.run_id) || str(u.runId) || displayName;
   if (!runId) return null;
 
+  // `status` is the LIFECYCLE; `current_phase` is the position within it — and
+  // a lifecycle word outranks the position, because pausing or stopping a run
+  // changes only the first of the two.
+  //
+  // Measured on a real run, 2026-09-17 (test/fixtures/
+  // workflow-lifecycle-live.jsonl):
+  //
+  //   running      status=active       current_phase=Plan
+  //   after Pause  status=user_paused  current_phase=Plan
+  //   after Stop   status=cancelled    current_phase=Plan
+  //
+  // Reading `current_phase` first meant the card kept saying "plan" through
+  // both, so Pause never became Resume and a stopped run never went grey —
+  // the owner reported exactly that, having watched the CLI confirm the pause
+  // in prose. The discriminator stays `workflow_updated` for all three, so
+  // there was no second channel that would have caught it.
+  //
+  // `active` deliberately does NOT qualify: it is the absence of a lifecycle
+  // event, and "Plan" tells the reader more than "active" does.
+  const statusRaw = str(u.status) || "";
+  const lifecycle = LIFECYCLE_STATUS.test(statusRaw.toLowerCase()) ? statusRaw : "";
+  const positionRaw = str(u.current_phase) || str(u.currentPhase) || str(u.phase);
   const phaseRaw =
-    str(u.current_phase) ||
-    str(u.currentPhase) ||
-    str(u.phase) ||
-    str(u.status) ||
+    lifecycle ||
+    positionRaw ||
+    statusRaw ||
     lastEventPhase(u) ||
     sessionUpdate.replace(/^workflow_/, "") ||
     "running";
   const phase = phaseRaw.toLowerCase();
+  // Where it stopped. Preferring the lifecycle must not throw the position
+  // away: `current_phase` is the only field that says where a paused run will
+  // resume from, so it moves to the detail line rather than off the card.
+  const position = lifecycle && positionRaw ? positionRaw : "";
   const objective = str(u.objective) || str(u.query) || str(u.description);
   const lastEvent = str(u.last_event) || str(u.lastEvent);
   const lastDetail = str(u.last_event_detail) || str(u.lastEventDetail);
@@ -214,18 +259,25 @@ function parseWorkflow(u: Record<string, unknown>, sessionUpdate: string): RunPr
   const agentLabel = str(u.current_agent_label) || str(u.currentAgentLabel);
 
   const detailParts: string[] = [];
-  if (pauseMsg) detailParts.push(pauseMsg);
-  else if (resultSummary) detailParts.push(resultSummary);
+  // Nothing in the detail line may repeat what the phase slot already says.
+  // The phase is `user_paused` where the row prints "user paused", so compare
+  // against the spaced form: that one rule then covers both the commonest
+  // frame in a live run (`phase_entered` + detail `Research`, beside a row
+  // already reading `· research`) and the pause frame (`workflow_paused` +
+  // detail `user`, beside a row already reading `· user paused`).
+  const alreadySaid = phase.replace(/[_-]+/g, " ");
+  const say = (text: string) => {
+    const t = text.trim();
+    if (t && !alreadySaid.includes(t.toLowerCase())) detailParts.push(t);
+  };
+
+  if (position) say(position);
+  if (pauseMsg) say(pauseMsg);
+  else if (resultSummary) say(resultSummary);
   else if (lastEvent) {
     const label = eventLabel(lastEvent);
-    const text = lastDetail ? (label ? `${label}: ${lastDetail}` : lastDetail) : label;
-    // Not when it only restates the phase. `phase_entered` + detail `Research`
-    // is the commonest frame in a real run by a wide margin, and the row
-    // already carries `· research` two slots to the left — so echoing it fills
-    // the detail line with the one thing the card had already said, and pushes
-    // the agent count to look like the interesting part of a duplicate.
-    if (text && text.toLowerCase() !== phase) detailParts.push(text);
-  } else if (agentLabel) detailParts.push(agentLabel);
+    say(lastDetail ? (label ? `${label}: ${lastDetail}` : lastDetail) : label);
+  } else if (agentLabel) say(agentLabel);
 
   // Spend, and it is reported as spend. `agents_used / agent_budget` used to
   // become `progress` here, which the card then drew as a percentage in the

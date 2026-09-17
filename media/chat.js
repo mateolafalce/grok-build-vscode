@@ -13648,6 +13648,11 @@
     el.querySelector(".run-progress-sep").hidden = redundant;
 
     const phase = String(update.phase || "running");
+    // Paused is neither working nor finished, and three places need to agree
+    // on it: the dots (removed), the controls (Resume rather than Pause), and
+    // the phase label. Derived from the machine value, never from the label —
+    // `user_paused` is what a real pause puts here.
+    const paused = /paus/.test(phase);
     const pct =
       typeof update.progress === "number" && Number.isFinite(update.progress)
         ? ` ${Math.round(update.progress * 100)}%`
@@ -13708,7 +13713,14 @@
     else if (row && !row._waitTimer && !state.replaying) armWaitElapsed(row, "run-progress-elapsed");
 
     const dots = el.querySelector(".blink-dots");
-    if (update.done) {
+    // Not while paused, and this was the owner's sharpest observation on the
+    // real card: "the timer continued, then stopped. But the three blinking
+    // dots didn't." Three dots pulsing beside the word "paused" says the card
+    // does not believe its own label — the dots mean "working", and a paused
+    // run is the one state that is neither working nor finished. The clock
+    // above keeps running on purpose: wall-clock time really is still passing,
+    // and freezing it would need a second timebase we do not have.
+    if (update.done || paused) {
       if (dots) dots.remove();
     } else if (!dots) {
       // Restarted (e.g. resume) — put dots back where the template puts them,
@@ -13722,7 +13734,6 @@
     const actions = el.querySelector(".run-progress-actions");
     if (update.kind === "workflow" && update.displayName && !update.done) {
       actions.hidden = false;
-      const paused = /paus/.test(phase);
       actions.innerHTML = "";
       const mk = (label, action) => {
         const b = document.createElement("button");
