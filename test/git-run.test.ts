@@ -19,6 +19,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { planGitOp } from "../src/git-status";
 import {
   GIT_WRITE_TIMEOUT_MS,
+  captureGitTurnBaseline,
   GitRunGate,
   readGitFileDiff,
   readGitStatus,
@@ -308,6 +309,72 @@ afterAll(() => {
 });
 
 describe.runIf(gitAvailable !== false)("readGitStatus against real git", () => {
+  it("captures pre-existing staged and unstaged edits without changing the index, files or stash ref", async () => {
+    const root = await makeRepo("turn-baseline");
+    const file = path.join(root, "README.md");
+    fs.writeFileSync(file, "pre-turn staged\n");
+    await git(root, "add", "README.md");
+    fs.appendFileSync(file, "pre-turn unstaged\n");
+    const indexBefore = await git(root, "ls-files", "--stage");
+    const statusBefore = await git(root, "status", "--porcelain");
+    const stashesBefore = await git(root, "stash", "list");
+    const baseline = await captureGitTurnBaseline(root);
+    expect(baseline).toMatch(/^[a-f0-9]{40,64}$/);
+    expect(await git(root, "ls-files", "--stage")).toBe(indexBefore);
+    expect(await git(root, "status", "--porcelain")).toBe(statusBefore);
+    expect(await git(root, "stash", "list")).toBe(stashesBefore);
+    expect(fs.readFileSync(file, "utf8")).toBe("pre-turn staged\npre-turn unstaged\n");
+    fs.appendFileSync(file, "agent first\n");
+    fs.appendFileSync(file, "user mid-turn\n");
+    fs.appendFileSync(file, "agent last\n");
+    const diff = await readGitFileDiff(root, "README.md", { baseline });
+    expect(diff.ok).toBe(true);
+    if (diff.ok) {
+      expect(diff.patch).toContain("+agent first");
+      expect(diff.patch).toContain("+user mid-turn");
+      expect(diff.patch).toContain("+agent last");
+      expect(diff.patch).not.toContain("+pre-turn");
+      expect(diff.patch).not.toContain("-hello");
+    }
+  });
+
+  it("captures clean HEAD and diffs new untracked files and tracked deletions", async () => {
+    const root = await makeRepo("turn-clean");
+    fs.writeFileSync(path.join(root, "already-untracked.txt"), "before turn\n");
+    const baseline = await captureGitTurnBaseline(root);
+    expect(baseline).toBe((await git(root, "rev-parse", "HEAD")).trim());
+    fs.appendFileSync(path.join(root, "already-untracked.txt"), "during turn\n");
+    const untracked = await readGitFileDiff(root, "already-untracked.txt", { baseline, untracked: true });
+    expect(untracked.ok && untracked.patch).toContain("+before turn");
+    expect(untracked.ok && untracked.patch).toContain("+during turn");
+    fs.writeFileSync(path.join(root, "new.txt"), "created this turn\n");
+    const added = await readGitFileDiff(root, "new.txt", { baseline, untracked: true });
+    expect(added.ok && added.patch).toContain("+created this turn");
+    fs.unlinkSync(path.join(root, "README.md"));
+    const deleted = await readGitFileDiff(root, "README.md", { baseline });
+    expect(deleted.ok && deleted.patch).toContain("-hello");
+  });
+
+  it("has no turn baseline in an unborn repository or a plain folder", async () => {
+    const root = await makeRepo("turn-unborn", { empty: true });
+    expect(await captureGitTurnBaseline(root)).toBeUndefined();
+    const plain = path.join(tmpRoot, "plain");
+    fs.mkdirSync(plain);
+    expect(await captureGitTurnBaseline(plain)).toBeUndefined();
+  });
+
+  it("a pathspec-shaped filename selects only that file's turn diff", async () => {
+    const root = await makeRepo("turn-literal");
+    for (const name of ["a[1].txt", "a1.txt"]) fs.writeFileSync(path.join(root, name), "before\n");
+    await git(root, "add", "-A");
+    await git(root, "commit", "-m", "files");
+    const baseline = await captureGitTurnBaseline(root);
+    fs.writeFileSync(path.join(root, "a[1].txt"), "chosen file\n");
+    fs.writeFileSync(path.join(root, "a1.txt"), "other file\n");
+    const diff = await readGitFileDiff(root, "a[1].txt", { baseline });
+    expect(diff.ok && diff.patch).toContain("+chosen file");
+    expect(diff.ok && diff.patch).not.toContain("other file");
+  });
   it("expands a wholly untracked directory into diffable files", async () => {
     const root = await makeRepo("new-directory");
     fs.mkdirSync(path.join(root, "docs", "nested"), { recursive: true });

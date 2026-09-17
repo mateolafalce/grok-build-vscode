@@ -82,6 +82,7 @@ import { GrokSidebar } from "../src/sidebar";
 
 function makeSidebar(cwd: string): any {
   const sidebar = Object.create(GrokSidebar.prototype) as any;
+  sidebar.pendingTurnDiffCaptures = new WeakSet();
   const memento: Record<string, unknown> = {};
   sidebar.providerConnectionState = { grok: true, codex: false };
   sidebar.providerConnections = vi.fn(() => sidebar.providerConnectionState);

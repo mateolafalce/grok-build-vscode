@@ -55,7 +55,7 @@
     "initialState", "moveViewHint", "welcomeTips", "projectSetup", "githubState", "githubRepos", "providerState", "mcpServers", "mcpConnectors", "mcpConnectorAuthorization", "routines", "codexInstallProgress", "planModeAvailability", "showThinking", "appPurpose", "fontScale", "grokUpdateStatus", "updateAvailable", "updateReady", "telemetryEnabled", "thumbsFeedback", "initialized",
     "cliUpdating", "session", "sessionName", "sessionRemoved", "modelChanged", "modeChanged", "openModePopover",
     "voiceState", "voiceConfigured", "voicePartial", "voiceSubmit", "voiceTranscript",
-    "voiceError", "chips", "commandsUpdate", "mentionResults", "projectDirListing", "projectFileContent", "projectFileWriteResult", "gitStatusResult", "gitFileDiffResult", "gitRunResult", "userMessage", "agentStart", "thoughtChunk",
+    "voiceError", "chips", "commandsUpdate", "mentionResults", "projectDirListing", "projectFileContent", "projectFileWriteResult", "gitStatusResult", "gitFileDiffResult", "turnFileDiffResult", "turnDiffBaseline", "gitRunResult", "userMessage", "agentStart", "thoughtChunk",
     "messageChunk", "media", "userMessageChunk", "historyReplay", "historyBatch", "permissionHistoryQueue",
     "planHistoryQueue", "toolCall", "toolCallUpdate", "permissionRequest", "permissionOptions",
     "permissionResolved", "exitPlanRequest", "planResolved", "questionRequest", "questionResolved", "planNotice", "autoCompactNotice", "planBlocked",
@@ -76,7 +76,7 @@
     "dropFile", "permissionAnswer", "exitPlanAnswer", "questionAnswer", "questionCancel",
     "setModel", "installCodex", "cancelCodexInstall", "runInstallCmd", "runGrokLogin", "cancelDeviceLogin", "submitDeviceLoginCode", "logout", "checkGrokUpdate", "updateGrok", "updateCodex", "updateClaude",
     "recheckConnection", "refreshProviders", "retryProviderSession", "listSessions", "listRepoSessions", "selectRepo", "toggleRepoPin", "setRepoArchived", "setRepoColor", "setRepoIcon", "toggleSessionPin", "resumeSession", "renameSession", "deleteSession",
-      "clearAllSessions", "pickFile", "mentionQuery", "addMentionFile", "listProjectDir", "readProjectFile", "writeProjectFile", "gitStatus", "gitFileDiff", "gitRun", "pasteImage", "uploadFile", "voiceStart", "voiceStop",
+      "clearAllSessions", "pickFile", "mentionQuery", "addMentionFile", "listProjectDir", "readProjectFile", "writeProjectFile", "gitStatus", "gitFileDiff", "turnFileDiff", "gitRun", "pasteImage", "uploadFile", "voiceStart", "voiceStop",
       "remoteVoiceStart", "remoteVoiceChunk", "remoteVoiceStop", "setVoiceBackend", "configureOpenAiVoice",
     "queueSend", "dequeueSend", "clearQueuedSends", "steerSend", "turnFeedback", "forkSession", "setSteerByDefault", "setPromptNav", "setExpandDiffCard",
     "setSoundNotifications", "setProcessingSound", "setReadRepliesAloud", "setSummarizeRepliesAloud", "setVoiceSendPhrase", "setVoiceKeyterms", "setTelemetryEnabled", "setThumbsFeedback", "summarizeSpeech", "requestImageFull", "requestImageOriginal", "composerFocus",
@@ -3098,9 +3098,9 @@
       // the wire are the REPLACED REGION of one edit, not snapshots of the
       // file, so splicing the first edit's old onto the last edit's new
       // describes a substitution that never happened — and the host expands it
-      // against disk into a confident whole-file diff of that fiction. A true
-      // one would need a pre-turn baseline the host does not keep. The card's
-      // rows reveal each file's own tool row instead, where the real diff is.
+      // against disk into a confident whole-file diff of that fiction. The
+      // chat card requests the host-captured baseline instead; without one it
+      // reveals the last tool row. Neither path changes these summed counts.
       const created = first.oldText === "" || (first.openDiff && first.openDiff.oldText === "");
       files.push({
         path: g.path,

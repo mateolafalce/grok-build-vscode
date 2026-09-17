@@ -291,7 +291,7 @@ import {
   resolveRemoteFileRoot,
   writeRemoteProjectFile,
 } from "./remote-files";
-import { GitRunGate, readGitFileDiff, readGitStatus, runGitPlan } from "./git-run";
+import { GitRunGate, captureGitTurnBaseline, readGitFileDiff, readGitStatus, runGitPlan } from "./git-run";
 import { describeGitFailure, isKnownChangedPath, planGitOp } from "./git-status";
 import {
   isCloudEnvironment,
@@ -877,6 +877,8 @@ export class GrokSidebar {
    * describe a tree that no longer exists.
    */
   private readonly gitRunGate = new GitRunGate();
+  private readonly turnDiffBaselines = new Map<string, { root: string; sha?: string }>();
+  private readonly pendingTurnDiffCaptures = new WeakSet<object>();
   /** Cold session/load claims the persisted id before ACP has emitted `session`. */
   private readonly sessionLoadReservations = new Map<string, SessionLoadReservation>();
   /** Sessions being spawned on a remote tab's behalf — a reconnect burst must
@@ -12370,6 +12372,36 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         });
         break;
       }
+      case "turnFileDiff": {
+        const correlation = { requestId: msg.requestId, turnId: msg.turnId, cwd: msg.cwd, path: msg.path };
+        const reply = (body: Extract<HostMsg, { type: "turnFileDiffResult" }>) => {
+          if (requester) this.sendRemoteRequester(requester, body);
+          else this.post(body);
+        };
+        const fail = (reason: string) => reply({ type: "turnFileDiffResult", ...correlation, ok: false, reason });
+        const rootResult = this.resolveGitRoot(msg.cwd, origin, clientId);
+        if (!rootResult.ok) { fail(rootResult.reason); break; }
+        const baseline = this.turnDiffBaselines.get(msg.turnId);
+        if (!baseline?.sha || !pathsEqual(baseline.root, rootResult.root)) {
+          fail("This turn's diff is no longer available.");
+          break;
+        }
+        // Same live path fence as gitFileDiff, even for a known turn identity.
+        const status = await readGitStatus(rootResult.root);
+        if (!status.ok) { fail(status.reason); break; }
+        if (!isKnownChangedPath(status.snapshot, msg.path)) {
+          fail("That file is no longer changed. Refresh and try again.");
+          break;
+        }
+        const entry = status.snapshot.files.find((file) => file.path === msg.path);
+        const diff = await readGitFileDiff(rootResult.root, msg.path, {
+          baseline: baseline.sha,
+          untracked: entry?.status === "?",
+        });
+        if (!diff.ok) { fail(diff.reason); break; }
+        reply({ type: "turnFileDiffResult", ...correlation, ok: true, patch: diff.patch, truncated: diff.truncated });
+        break;
+      }
       case "gitRun": {
         const correlation = typeof msg.requestId === "string" ? { requestId: msg.requestId } : {};
         const op = msg.op;
@@ -12453,6 +12485,33 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         break;
     }
 
+  }
+
+  private startTurnDiffBaseline(session: Session, turn: object): void {
+    const root = this.sessionCwd(session);
+    const turnId = randomUUID();
+    const baseline: { root: string; sha?: string } = { root };
+    this.turnDiffBaselines.set(turnId, baseline);
+    // Bound both completed and pending turns. Eviction must never resurrect on completion.
+    if (this.turnDiffBaselines.size > 100) {
+      this.turnDiffBaselines.delete(this.turnDiffBaselines.keys().next().value!);
+    }
+    this.emit(session, { type: "turnDiffBaseline", turnId, cwd: root });
+    // Skip a busy repo rather than queue a snapshot of a later working tree.
+    if (!this.gitRunGate.tryAcquire(root)) return;
+    const gen = session.gen;
+    this.pendingTurnDiffCaptures.add(turn);
+    void captureGitTurnBaseline(root).then((sha) => {
+      if (session.gen === gen && session.turnToken === turn
+        && this.pendingTurnDiffCaptures.has(turn) && this.turnDiffBaselines.get(turnId) === baseline) {
+        baseline.sha = sha;
+      }
+    }).catch(() => {
+      // Capture is best effort; an unavailable baseline keeps the tool-row path.
+    }).finally(() => {
+      this.pendingTurnDiffCaptures.delete(turn);
+      this.gitRunGate.release(root);
+    });
   }
 
   /**
@@ -15495,13 +15554,35 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       const stale = this.openDiffsByRequest.set(session, requestId, { left, right });
       if (stale) this.closeDiffUris(stale);
     }
-    // preview:true reuses a single preview tab across grok's many small sequential
-    // edits; preserveFocus:true keeps focus on the chat so the permission card is
+    // preview:false, and the `false` is the fix for #167 — *"agent edits
+    // unexpectedly close open editor tabs"*.
+    //
+    // It used to be true, to reuse one preview tab across grok's many small
+    // sequential edits. But VS Code keeps exactly ONE preview slot per editor
+    // group — the italic tab a single click in the Explorer produces — so this
+    // diff took that slot and its occupant was gone at that instant.
+    // `closeDiffTabs` then destroyed our diff when the card was answered, and
+    // that part is correctly guarded (both sides must be `grok-diff:` URIs), so
+    // we never closed the user's file. We took its seat and then burned the
+    // chair, which is indistinguishable from the outside.
+    //
+    // It is also why the report read as intermittent: it needs a single-clicked
+    // tab (a double-clicked, edited or pinned one is never in the preview slot)
+    // AND a turn that emits a permission card — under auto-accept we return
+    // before a card exists and never open this at all. Same family as #132,
+    // fixed in 3.19.2, which stopped the diff RE-OPENING and left this untouched.
+    //
+    // The price, so it is not rediscovered: a turn with many edits now leaves a
+    // tab each instead of reusing one. `closeDiffTabs` removes each as its card
+    // is answered, so they only accumulate where cards go unanswered — which is
+    // the case where you wanted the tabs anyway.
+    //
+    // preserveFocus:true keeps focus on the chat so the permission card is
     // immediately clickable. `selection` opens a whole-file diff on the edit
     // instead of at line 1 (#66) — harmless at 0 when expansion fell back.
     const at = sides.firstChangedLine;
     await this.host.openDiff(left, right, `Grok proposed: ${base}`, {
-      preview: true,
+      preview: false,
       preserveFocus: true,
       selection: {
         start: { line: at, character: 0 },
@@ -16377,6 +16458,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     // The token, not the status, is what says a turn is running from here on —
     // and only whoever holds it may end this one.
     const turn = beginTurn(session);
+    this.startTurnDiffBaseline(session, turn);
     this.setStatus(session, "working");
     // The send IS the activity — the rail should not wait ~2s for the CLI to
     // write a transcript before admitting you are working in this conversation.
@@ -16580,6 +16662,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     // The resend is a turn in its own right — it gets its own token, and the
     // outer turn's `finally` can no longer end it (the tokens differ).
     const turn = beginTurn(session);
+    this.startTurnDiffBaseline(session, turn);
     this.setStatus(session, "working");
     session.adapterTurnCallUsed = [];
     try {
@@ -17632,6 +17715,10 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
    * focused one, so this is behaviorally identical to `post`.)
    */
   private emit(session: Session, message: HostMsg): void {
+    // A capture still running when tools start may already contain their writes.
+    // Prefer the tool-row fallback to presenting that as the pre-turn file.
+    if (session.turnToken && (message.type === "toolCall" || message.type === "toolCallUpdate"
+      || message.type === "permissionRequest")) this.pendingTurnDiffCaptures.delete(session.turnToken);
     if (session.suppressContent && GrokSidebar.SUPPRESS_TYPES.has(message.type)) return;
     if (message.type === "clearMessages") session.buffer = [];
     else if (!GrokSidebar.TRANSIENT_TYPES.has(message.type)) session.buffer.push(message);

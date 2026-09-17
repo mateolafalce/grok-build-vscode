@@ -26,11 +26,15 @@ import {
   GIT_NUMSTAT_ARGS,
   GIT_REMOTE_ARGS,
   GIT_STATUS_ARGS,
+  GIT_TURN_BASELINE_ARGS,
+  GIT_HEAD_ARGS,
   buildGitStatusSnapshot,
   gitDiffArgs,
   gitDiffUntrackedArgs,
+  gitTurnDiffArgs,
   gitUnpushedArgs,
   parseGitNumstatZ,
+  parseGitBaseline,
   parseGitStatusPorcelain2,
   parseUnpushedLog,
   type GitOpPlan,
@@ -50,6 +54,7 @@ export const GIT_READ_TIMEOUT_MS = 20_000;
 export const GIT_WRITE_TIMEOUT_MS = 180_000;
 /** A patch past this is cut; the view says so rather than rendering silence. */
 export const GIT_DIFF_MAX_BYTES = 2 * 1024 * 1024;
+export const GIT_BASELINE_TIMEOUT_MS = 5_000;
 
 export interface GitExecResult {
   ok: boolean;
@@ -184,8 +189,23 @@ export type GitDiffRead =
   | { ok: true; patch: string; truncated: boolean; untracked: boolean }
   | { ok: false; reason: string };
 
+/** Caller holds GitRunGate. Never waits on the prompt path or updates refs. */
+export async function captureGitTurnBaseline(
+  root: string,
+  opts?: { io?: GitIo; env?: NodeJS.ProcessEnv },
+): Promise<string | undefined> {
+  const options = { ...opts, timeoutMs: GIT_BASELINE_TIMEOUT_MS };
+  // Capture the immutable HEAD before stash, never resolve a moving ref at click.
+  const head = await runGit(root, GIT_HEAD_ARGS, options);
+  const headSha = head.ok ? parseGitBaseline(head.stdout) : undefined;
+  if (!headSha) return undefined; // includes an unborn / non-git directory
+  const stash = await runGit(root, GIT_TURN_BASELINE_ARGS, options);
+  if (!stash.ok) return undefined;
+  return stash.stdout.trim() ? parseGitBaseline(stash.stdout) : headSha;
+}
+
 /**
- * One file's diff against the last commit.
+ * One file's diff against a host-owned baseline (the last commit by default).
  *
  * The path is checked against the snapshot by the caller, not here — this
  * function is given a path the repository is already reporting as changed.
@@ -198,9 +218,10 @@ export type GitDiffRead =
 export async function readGitFileDiff(
   root: string,
   path: string,
-  opts?: { io?: GitIo; env?: NodeJS.ProcessEnv; untracked?: boolean },
+  opts?: { io?: GitIo; env?: NodeJS.ProcessEnv; untracked?: boolean; baseline?: string },
 ): Promise<GitDiffRead> {
-  const args = opts?.untracked ? gitDiffUntrackedArgs(path) : gitDiffArgs(path);
+  const args = opts?.untracked ? gitDiffUntrackedArgs(path)
+    : opts?.baseline ? gitTurnDiffArgs(path, opts.baseline) : gitDiffArgs(path);
   const result = await runGit(root, args, { ...opts, maxBytes: GIT_DIFF_MAX_BYTES + 1024 });
   const hasPatch = result.stdout.length > 0;
   if (!result.ok && !hasPatch) {

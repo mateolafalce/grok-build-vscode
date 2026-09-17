@@ -28,6 +28,8 @@ class Reviving {
 
 function recovering(replayEndsWith?: string) {
   const sidebar = Object.create(GrokSidebar.prototype) as any;
+  sidebar.startTurnDiffBaseline = vi.fn();
+  sidebar.pendingTurnDiffCaptures = new WeakSet();
   const session = new Session();
   session.provider = "claude";
   session.activeSessionId = "s1";

@@ -155,9 +155,23 @@ export function gitUnpushedArgs(upstream: string | null, limit: number = UNPUSHE
   return ["log", format, capped, "HEAD", "--not", "--remotes"];
 }
 
-/** `git diff HEAD -- <path>` for a tracked file. */
-export function gitDiffArgs(path: string): string[] {
-  return ["diff", "HEAD", "--", path];
+/** Diff a tracked file against HEAD or an immutable base captured by the host. */
+export function gitDiffArgs(path: string, baseline: string = "HEAD"): string[] {
+  return ["diff", baseline, "--", path];
+}
+
+/** A real filename such as a[1].ts must never select another file's hunks. */
+export function gitTurnDiffArgs(path: string, baseline: string): string[] {
+  return ["--literal-pathspecs", ...gitDiffArgs(path, baseline)];
+}
+
+export const GIT_TURN_BASELINE_ARGS: readonly string[] = ["stash", "create"];
+export const GIT_HEAD_ARGS: readonly string[] = ["rev-parse", "--verify", "HEAD"];
+
+/** Only a complete object id from a successful host-side git read is a base. */
+export function parseGitBaseline(output: string): string | undefined {
+  const sha = output.trim();
+  return /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(sha) ? sha : undefined;
 }
 
 /** Whole-file diff for a file git has never seen. */

@@ -40,6 +40,8 @@ describe("session-scoped auth recovery", () => {
 
 function recoverySidebar(error: unknown, provider: "grok" | "claude" | "codex" = "grok") {
   const sidebar = Object.create(GrokSidebar.prototype) as any;
+  sidebar.startTurnDiffBaseline = vi.fn();
+  sidebar.pendingTurnDiffCaptures = new WeakSet();
   const session = new Session();
   session.provider = provider;
   session.hasHistory = true;

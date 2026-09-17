@@ -3008,6 +3008,10 @@ body.vscode-light {
   flex-direction: column;
   gap: 2px;
 }
+.turn-file-diff {
+  min-width: 0;
+  margin: 4px 0 8px;
+}
 .turn-diff-file {
   /* letter · path · stat. A grid rather than the old space-between flex, so
      the status letters make a column of their own and the paths start on one

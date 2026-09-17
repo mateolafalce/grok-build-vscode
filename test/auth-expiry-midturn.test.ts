@@ -27,6 +27,8 @@ class Dead {
 
 function makeSidebar(opts: { credential?: boolean; tried?: boolean } = {}) {
   const sidebar = Object.create(GrokSidebar.prototype) as any;
+  sidebar.startTurnDiffBaseline = vi.fn();
+  sidebar.pendingTurnDiffCaptures = new WeakSet();
   const flagged: [string, boolean][] = [];
   sidebar.setProviderNeedsLogin = vi.fn((provider: string, needsLogin: boolean) => {
     flagged.push([provider, needsLogin]);

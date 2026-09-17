@@ -280,6 +280,7 @@ export const INBOUND_DISPOSITION: Record<WebviewMsg["type"], InboundDisposition>
   // GIT_OPTIONAL_LOCKS=0 and no write path at all.
   gitStatus: "view",
   gitFileDiff: "view",
+  turnFileDiff: "view",
   // input/turn control (propose+)
   send: "propose",
   newSession: "propose",
@@ -590,6 +591,7 @@ export const REMOTE_REQUIRES_BOUND_SESSION: Record<WebviewMsg["type"], boolean> 
   // came back to check on it.
   gitStatus: false,
   gitFileDiff: false,
+  turnFileDiff: false,
   gitRun: false,
   send: true,
   newSession: false,
@@ -793,6 +795,7 @@ export function allowRemoteRepoTarget(msg: WebviewMsg, isKnownCwd: (cwd: string)
     // most here because gitRun writes.
     case "gitStatus":
     case "gitFileDiff":
+    case "turnFileDiff":
     case "gitRun":
       return isKnownCwd(msg.cwd);
     case "resumeSession":
@@ -995,6 +998,8 @@ export const OUTBOUND_DISPOSITION: Record<HostMsg["type"], OutboundDisposition> 
   providerConfigWriteResult: "mirror",
   gitStatusResult: "mirror",
   gitFileDiffResult: "mirror",
+  turnFileDiffResult: "mirror",
+  turnDiffBaseline: "mirror",
   gitRunResult: "mirror",
   userMessage: "mirror",
   agentStart: "mirror",
@@ -1189,6 +1194,8 @@ export const OUTBOUND_PROJECT_AUTH: Record<HostMsg["type"], OutboundProjectAuth>
   providerConfigWriteResult: "none",
   gitStatusResult: "message-cwd",
   gitFileDiffResult: "message-cwd",
+  turnFileDiffResult: "message-cwd",
+  turnDiffBaseline: "scope",
   gitRunResult: "message-cwd",
   userMessage: "scope",
   agentStart: "scope",
@@ -1358,6 +1365,7 @@ export function mayDeliverRemoteHostMsg(
         msg.type === "projectFileWriteResult" ||
         msg.type === "gitStatusResult" ||
         msg.type === "gitFileDiffResult" ||
+        msg.type === "turnFileDiffResult" ||
         msg.type === "gitRunResult"
       ) {
         return cwdIsAuthorized(msg.cwd, authorizedCwds, sameCwd);

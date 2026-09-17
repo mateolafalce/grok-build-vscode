@@ -614,6 +614,7 @@ function sidebarMethodBody(signature: string): string {
 
 function makeTelemetrySidebar(cwd = "/repo"): any {
   const instance = Object.create(GrokSidebar.prototype) as any;
+  instance.startTurnDiffBaseline = vi.fn();
   instance.lastProviderConnected = { grok: true, codex: false, claude: false };
   instance.lastVoiceConfiguredByCwd = new Map([[normalizeRepoPath(cwd), true]]);
   instance.locatedProviders = vi.fn(() => {

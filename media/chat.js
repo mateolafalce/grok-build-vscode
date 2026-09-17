@@ -855,6 +855,7 @@
     // agentStart / next user message; the card itself stays in the transcript.
     turnEditsByToolCallId: new Map(),
     turnDiffSummaryEl: null,
+    turnDiffBaseline: null,
     // Restored question cards on resume (toolCallId → card element). On replay grok
     // sends a tool_call per question (with rawInput.questions); we render the card
     // immediately and fill the answer in whenever it arrives — on the tool_call
@@ -9552,7 +9553,7 @@
   }
 
   const REPLAY_HOLD_TYPES = new Set([
-    "userMessage", "agentStart", "thoughtChunk", "messageChunk", "media",
+    "userMessage", "agentStart", "turnDiffBaseline", "thoughtChunk", "messageChunk", "media",
     "userMessageChunk", "historyBatch", "toolCall", "toolCallUpdate",
     "permissionRequest", "permissionOptions", "permissionResolved",
     "exitPlanRequest", "planResolved", "questionRequest", "questionResolved", "planNotice",
@@ -9677,6 +9678,7 @@
       // its card would be pinned into the history nodes.
       turnEdits: [...state.turnEditsByToolCallId],
       turnDiffSummaryEl: state.turnDiffSummaryEl,
+      turnDiffBaseline: state.turnDiffBaseline,
       turnRating: state.turnRating,
       suppressReplayTurn: state.suppressReplayTurn,
       skipUserBubble: state.skipUserBubble,
@@ -9698,6 +9700,7 @@
     state.activeToolGroupEl = null;
     state.turnAgentActionsEl = null;
     state.turnEditsByToolCallId.clear();
+    state.turnDiffBaseline = null;
     state.turnDiffSummaryEl = null;
     state.suppressReplayTurn = false;
     state.skipUserBubble = false;
@@ -9743,6 +9746,7 @@
     state.turnEditsByToolCallId.clear();
     for (const [id, entry] of saved.turnEdits) state.turnEditsByToolCallId.set(id, entry);
     state.turnDiffSummaryEl = saved.turnDiffSummaryEl;
+    state.turnDiffBaseline = saved.turnDiffBaseline;
     state.turnRating = saved.turnRating;
     state.suppressReplayTurn = saved.suppressReplayTurn;
     state.skipUserBubble = saved.skipUserBubble;
@@ -9848,6 +9852,7 @@
     state.toolExpandOverride = null; // the Expand/Collapse All latch is per-session; a swap/restore starts clean (the replay buffer re-applies it for a warm re-focus)
     state.turnAgentActionsEl = null;
     state.turnEditsByToolCallId.clear();
+    state.turnDiffBaseline = null;
     state.turnDiffSummaryEl = null;
     state.activeAgentEl = null;
     state.activeAgentRaw = "";
@@ -10877,7 +10882,85 @@
     // Leave any previous turn's card in the transcript; only drop the live
     // pointer + per-call map so this turn starts empty.
     state.turnEditsByToolCallId.clear();
+    state.turnDiffBaseline = null;
     state.turnDiffSummaryEl = null;
+  }
+
+  const turnFileDiffPending = new Map();
+  let turnFileDiffRequestSeq = 0;
+
+  function showTurnFileDiff(card, row, path, revealId) {
+    const fallback = () => { if (revealId) revealToolDiff(revealId); };
+    const baseline = card._turnDiffBaseline;
+    const parser = window.GrokFilePanel;
+    if (!baseline || !parser || !parser.patchRowsToDiffHunks) { fallback(); return; }
+    if (row._turnDiffRegion) {
+      row._turnDiffRegion.remove();
+      row._turnDiffRegion = null;
+      row.setAttribute("aria-expanded", "false");
+      return;
+    }
+    const region = document.createElement("div");
+    region.className = "turn-file-diff";
+    region.textContent = "Loading diff…";
+    row.after(region);
+    row._turnDiffRegion = region;
+    row.setAttribute("aria-expanded", "true");
+    const requestId = "turn-diff-" + (++turnFileDiffRequestSeq);
+    const request = { type: "turnFileDiff", requestId, turnId: baseline.turnId, cwd: baseline.cwd, path };
+    const finish = (msg) => {
+      clearTimeout(timer);
+      turnFileDiffPending.delete(requestId);
+      // A repaint, collapse or session switch invalidates only this request's DOM.
+      if (!row.isConnected || row._turnDiffRegion !== region || !region.isConnected) return;
+      if (!msg.ok) {
+        // With a tool row to reveal, revealing it IS the answer and the region
+        // gets out of the way. Without one there is nothing to reveal — a
+        // deleted file has no edit call, so `lastCallByPath` never named it —
+        // and removing the region silently would leave a button that does
+        // nothing when pressed. Say why instead; a dead control is the whole
+        // complaint in #160 and it is not worth re-earning here.
+        if (revealId) {
+          region.remove();
+          row._turnDiffRegion = null;
+          row.setAttribute("aria-expanded", "false");
+          fallback();
+          return;
+        }
+        region.textContent = "";
+        const note = document.createElement("div");
+        note.className = "tool-diff-more";
+        note.textContent = msg.reason || "Could not read this file's diff for the turn.";
+        region.appendChild(note);
+        return;
+      }
+      region.textContent = "";
+      const hunks = parser.patchRowsToDiffHunks(parser.parseUnifiedDiff(msg.patch));
+      if (hunks.length) region.appendChild(buildInlineDiffRegion(hunks, { inlineOnly: true }));
+      else {
+        const note = document.createElement("div");
+        note.className = "tool-diff-more";
+        note.textContent = msg.patch ? "No text diff available for this file." : "No changes since this turn started.";
+        region.appendChild(note);
+      }
+      if (msg.truncated) {
+        const note = document.createElement("div");
+        note.className = "tool-diff-more";
+        note.textContent = "Diff truncated — this preview is incomplete.";
+        region.appendChild(note);
+      }
+    };
+    const timer = setTimeout(() => finish({ ok: false }), 60000);
+    turnFileDiffPending.set(requestId, { request, finish });
+    vscode.postMessage(request);
+  }
+
+  function handleTurnFileDiffResult(msg) {
+    const pending = turnFileDiffPending.get(msg.requestId);
+    if (!pending) return;
+    const request = pending.request;
+    if (msg.turnId !== request.turnId || msg.cwd !== request.cwd || msg.path !== request.path) return;
+    pending.finish(msg);
   }
 
   function pinTurnDiffSummary() {
@@ -10886,10 +10969,10 @@
   }
 
   /** Workspace-relative path for the summary list (falls back to the raw path). */
-  function turnEditDisplayPath(p) {
+  function turnEditDisplayPath(p, root) {
     if (!p) return "Unknown file";
     let s = String(p).replace(/\\/g, "/");
-    const cwd = (state.cwd || "").replace(/\\/g, "/").replace(/\/+$/, "");
+    const cwd = (root || state.cwd || "").replace(/\\/g, "/").replace(/\/+$/, "");
     if (cwd) {
       const sl = s.toLowerCase();
       const cl = cwd.toLowerCase();
@@ -11014,6 +11097,8 @@
       el.className = "turn-diff-summary" + (state.expandDiffCard ? " expanded" : "");
       el.setAttribute("role", "region");
       el.setAttribute("aria-label", "Files changed this turn");
+      // Past cards remain live: never read the current turn at click time.
+      el._turnDiffBaseline = state.turnDiffBaseline;
       state.turnDiffSummaryEl = el;
     }
     while (el.firstChild) el.removeChild(el.firstChild);
@@ -11051,14 +11136,9 @@
     list.className = "turn-diff-summary-list";
     for (const f of agg.files) {
       const isDel = f.action === "deleted";
-      // The row opens that file's own tool row, on every surface. There is no
-      // whole-turn diff to open instead: a wire diff carries the REPLACED
-      // REGION, not a snapshot, so a file edited twice has no honest before/
-      // after without host-side baselines — and the tool row it reveals holds
-      // the real diff, with its own "open diff →" to the native editor beside
-      // it. A remote could not have posted openDiff anyway (host-local).
       const revealId = lastCallByPath.get(normalizeTurnEditPathKey(f.path || ""));
-      const clickable = !isDel && !!revealId;
+      const clickable = !!el._turnDiffBaseline || (!isDel && !!revealId);
+      const diffPath = turnEditDisplayPath(f.path, el._turnDiffBaseline && el._turnDiffBaseline.cwd);
       const row = document.createElement(clickable ? "button" : "div");
       row.className = "turn-diff-file"
         + (clickable ? " has-diff" : "")
@@ -11066,11 +11146,10 @@
       if (clickable) {
         row.type = "button";
         row.title = "Show the diff";
+        if (el._turnDiffBaseline) row.setAttribute("aria-expanded", "false");
         row.onclick = (e) => {
           e.stopPropagation();
-          // Expands the row and its group, and scrolls it into view — the same
-          // answer the permission card gives a remote.
-          revealToolDiff(revealId);
+          showTurnFileDiff(el, row, diffPath, revealId);
         };
       }
       // M / A / D in front of the path — git's own letters, the ones the
@@ -12373,7 +12452,8 @@
     if (remaining > 0) {
       const more = document.createElement("div");
       more.className = "tool-diff-more";
-      more.textContent = "... " + remaining + " more line(s) - open diff for the full change";
+      more.textContent = "... " + remaining + " more line(s)"
+        + (opts && opts.inlineOnly ? " — preview limit reached" : " - open diff for the full change");
       more.hidden = true;
       previewOverflow.push(more);
       wrap.appendChild(more);
@@ -18166,6 +18246,7 @@
         state.activeToolGroupEl = null;
         state.turnAgentActionsEl = null;
         state.turnEditsByToolCallId.clear();
+        state.turnDiffBaseline = null;
         state.turnDiffSummaryEl = null;
         // The host has just rebuilt the aggregate from the surviving ledger.
         // No completed-turn figure survives a rewind; when the whole transcript
@@ -18518,6 +18599,12 @@
         }
         addMessage("user", msg.text, msg.chips || [], { steer: msg.steer });
         forceScrollToBottom(); // jump back to the bottom on the user's own send (#16)
+        break;
+      case "turnDiffBaseline":
+        state.turnDiffBaseline = { turnId: msg.turnId, cwd: msg.cwd };
+        break;
+      case "turnFileDiffResult":
+        handleTurnFileDiffResult(msg);
         break;
       case "agentStart":
         // A user-initiated turn began. Show Grokking until content replaces it.

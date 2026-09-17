@@ -723,6 +723,10 @@ export type HostMsg =
       untracked: boolean;
     }
   | { type: "gitFileDiffResult"; requestId?: string; cwd: string; path: string; ok: false; reason: string }
+  /** Host-owned turn identity, emitted immediately after agentStart. No ref on the wire. */
+  | { type: "turnDiffBaseline"; turnId: string; cwd: string }
+  | { type: "turnFileDiffResult"; requestId: string; turnId: string; cwd: string; path: string; ok: true; patch: string; truncated: boolean }
+  | { type: "turnFileDiffResult"; requestId: string; turnId: string; cwd: string; path: string; ok: false; reason: string }
   /**
    * Answer to `gitRun`. On success the fresh snapshot comes back in the same
    * message, so the list cannot briefly show the state that was just committed.
@@ -1369,6 +1373,8 @@ export type WebviewMsg =
    * fence than any string test could be.
    */
   | { type: "gitFileDiff"; requestId?: string; cwd: string; path: string }
+  /** The host resolves turnId to its captured base; clients cannot supply a ref. */
+  | { type: "turnFileDiff"; requestId: string; turnId: string; cwd: string; path: string }
   /**
    * Changes view: run one of the four operations in the closed set.
    *
@@ -1479,7 +1485,7 @@ const HOST_MESSAGE_TYPE_MAP: Record<HostMsg["type"], true> = {
   initialized: true, cliUpdating: true, session: true, sessionName: true, modelChanged: true,
   modeChanged: true, openModePopover: true, voiceState: true, voiceConfigured: true,
   voicePartial: true, voiceSubmit: true, voiceTranscript: true, voiceError: true,
-  chips: true, commandsUpdate: true, mentionResults: true, projectDirListing: true, projectFileContent: true, projectFileWriteResult: true, gitStatusResult: true, gitFileDiffResult: true, gitRunResult: true, userMessage: true, agentStart: true,
+  chips: true, commandsUpdate: true, mentionResults: true, projectDirListing: true, projectFileContent: true, projectFileWriteResult: true, gitStatusResult: true, gitFileDiffResult: true, turnFileDiffResult: true, turnDiffBaseline: true, gitRunResult: true, userMessage: true, agentStart: true,
   providerConfigContent: true, providerConfigWriteResult: true,
   thoughtChunk: true, messageChunk: true, media: true, userMessageChunk: true,
   historyReplay: true, historyBatch: true, permissionHistoryQueue: true, planHistoryQueue: true,
@@ -1515,7 +1521,7 @@ const WEBVIEW_MESSAGE_TYPE_MAP: Record<WebviewMsg["type"], true> = {
   clearAllSessions: true, pickFile: true, mentionQuery: true, addMentionFile: true,
   listProjectDir: true, readProjectFile: true, writeProjectFile: true,
   readProviderConfig: true, writeProviderConfig: true, restartProviderSession: true,
-  gitStatus: true, gitFileDiff: true, gitRun: true,
+  gitStatus: true, gitFileDiff: true, turnFileDiff: true, gitRun: true,
   pasteImage: true, uploadFile: true, voiceStart: true,
   voiceStop: true, setVoiceBackend: true, configureOpenAiVoice: true, remoteVoiceStart: true, remoteVoiceChunk: true,
   remoteVoiceStop: true, queueSend: true, dequeueSend: true, clearQueuedSends: true,

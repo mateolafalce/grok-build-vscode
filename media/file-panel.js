@@ -588,6 +588,24 @@
     return rows;
   }
 
+  /** Adapt parsed patch rows to chat.js's shared inline diff renderer. */
+  function patchRowsToDiffHunks(rows) {
+    const hunks = [];
+    let hunk = null;
+    for (const row of rows) {
+      if (row.kind === "hunk") { hunk = null; continue; }
+      if (row.kind !== "add" && row.kind !== "del" && row.kind !== "ctx") continue;
+      if (!hunk) {
+        hunk = { site: {}, result: { lines: [] } };
+        hunks.push(hunk);
+      }
+      if (hunk.site.oldLine == null && row.oldNo != null) hunk.site.oldLine = row.oldNo;
+      if (hunk.site.newLine == null && row.newNo != null) hunk.site.newLine = row.newNo;
+      hunk.result.lines.push({ type: row.kind, text: row.text });
+    }
+    return hunks;
+  }
+
   /**
    * The +N −M pair as DOM, in the product's diff palette.
    *
@@ -4189,6 +4207,7 @@
     changeCountLabel,
     changeTotalLabel,
     parseUnifiedDiff,
+    patchRowsToDiffHunks,
   };
 
   if (typeof module !== "undefined" && module.exports) module.exports = api;
