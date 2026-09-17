@@ -12593,6 +12593,14 @@
     // reconstruction in the native editor.
     for (const { diff, hunks } of blocks) {
       details.appendChild(buildInlineDiffRegion(hunks));
+      // Desk only, and this was the inconsistency the owner asked about from
+      // the other side: a remote's click posts `openDiff`, which is host-local,
+      // so policy refuses it and NOTHING happens. Unlike the permission card
+      // there is no `revealToolDiff` fallback worth reaching for either — this
+      // button sits INSIDE the inline region it would reveal, so the diff a
+      // phone would "open" is already on screen directly above it. #160 is
+      // exactly this complaint about a control that does nothing.
+      if (IS_REMOTE) continue;
       const preview = document.createElement("button");
       preview.className = "preview-link";
       preview.textContent = "open diff →";
