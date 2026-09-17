@@ -111,3 +111,34 @@ describe("a live run carries an elapsed clock", () => {
     expect(phase(doc, "run-abc")).toBe("· done");
   });
 });
+
+describe("the liveness dots cannot be mistaken for a truncated run name", () => {
+  // The owner's first look at a card built from REAL captured frames:
+  // "those dots in the middle" — they sat immediately after the title, and
+  // `.run-progress-title` is `text-overflow: ellipsis`, so a long name really
+  // does end in "…". Two different meanings drawn identically, one pixel
+  // apart. They belong after the phase, pulsing on what is in progress.
+  const order = (doc: Document) =>
+    [...(card(doc, "run-abc")!.querySelector(".run-progress-row") as HTMLElement).children]
+      .map((c) => c.className.split(" ")[0]);
+
+  it("puts them after the phase, never between the title and it", () => {
+    const { window, doc } = bootWebview();
+    dispatch(window, { type: "runProgress", update: workflowUpdate() });
+    const seq = order(doc);
+    expect(seq.indexOf("blink-dots")).toBeGreaterThan(seq.indexOf("run-progress-phase"));
+    expect(seq.indexOf("run-progress-phase")).toBe(seq.indexOf("run-progress-title") + 1);
+  });
+
+  it("restores them to the same place when a finished run resumes", () => {
+    // The resume path re-inserts the dots with its own anchor, so it is the
+    // one place this can silently diverge from the template.
+    const { window, doc } = bootWebview();
+    dispatch(window, { type: "runProgress", update: workflowUpdate() });
+    dispatch(window, { type: "runProgress", update: workflowUpdate({ phase: "completed", done: true }) });
+    expect(order(doc)).not.toContain("blink-dots");
+    dispatch(window, { type: "runProgress", update: workflowUpdate({ phase: "executing" }) });
+    const seq = order(doc);
+    expect(seq.indexOf("blink-dots")).toBeGreaterThan(seq.indexOf("run-progress-phase"));
+  });
+});

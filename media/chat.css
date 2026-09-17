@@ -2675,6 +2675,10 @@ body.thinking-hidden .msg.thinking { display: none; }
   white-space: nowrap;
 }
 .run-progress-card .run-progress-phase { flex: none; opacity: 0.85; }
+/* The liveness dots sit after the phase (see the template in chat.js) and must
+   not shrink: a squashed set of three reads as a rendering fault, and the row
+   has the title's ellipsis to give away instead. */
+.run-progress-card .run-progress-row .blink-dots { flex: none; }
 /* The run's elapsed time. Tabular figures so the row does not twitch once a
    second, and last in the row so it never pushes the phase off a narrow
    phone. Same treatment as .grokking-elapsed — it is the same readout. */

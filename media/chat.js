@@ -13614,8 +13614,17 @@
           `<span class="run-progress-kind"></span>` +
           `<span class="run-progress-sep">·</span>` +
           `<span class="run-progress-title"></span>` +
-          BLINK_DOTS +
+          // After the PHASE, not after the title. `.run-progress-title` is
+          // `text-overflow: ellipsis`, so a long run name really does end in
+          // "…" — and three dots glued to its right edge (the dots carry
+          // `margin-left: 1px`) are indistinguishable from that truncation.
+          // The owner read the card exactly that way the first time he saw a
+          // real one: "those dots in the middle" don't look like liveness,
+          // they look like a name cut short. Past the phase they pulse on the
+          // thing that is actually in progress, which is also the idiom
+          // everywhere else in this file — `Thinking⋯`, never `Think⋯ing`.
           `<span class="run-progress-phase"></span>` +
+          BLINK_DOTS +
         `</div>` +
         `<div class="run-progress-sub" hidden></div>` +
         `<div class="run-progress-detail" hidden></div>` +
@@ -13694,9 +13703,11 @@
     if (update.done) {
       if (dots) dots.remove();
     } else if (!dots) {
-      // Restarted (e.g. resume) — put dots back after the title.
-      const titleEl = el.querySelector(".run-progress-title");
-      if (titleEl) titleEl.insertAdjacentHTML("afterend", BLINK_DOTS);
+      // Restarted (e.g. resume) — put dots back where the template puts them,
+      // after the phase. Anchoring this on the title instead is what would
+      // quietly reintroduce the ellipsis ambiguity on resumed runs only.
+      const phaseAnchor = el.querySelector(".run-progress-phase");
+      if (phaseAnchor) phaseAnchor.insertAdjacentHTML("afterend", BLINK_DOTS);
     }
 
     // Workflow control buttons (pause/resume/stop) while running or paused.
