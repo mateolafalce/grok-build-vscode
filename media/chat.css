@@ -4575,8 +4575,11 @@ body.dragging { outline: 2px dashed var(--vscode-focusBorder); outline-offset: -
 .card-actions button.primary { font-weight: 600; }
 .card-actions button.danger {
   color: var(--vscode-errorForeground);
+  /* The gap sets No apart from the Yeses. There is no border-top here because
+     the button above already draws its own border-bottom, and the two together
+     rendered as TWO rules 10px apart -- one closing the allow group and one
+     opening this button. Visible with four options, obvious at three. */
   margin-top: 10px;
-  border-top: 1px solid var(--vscode-editorWidget-border);
 }
 .card-actions button.danger.arming { pointer-events: none; }
 .card-actions button:disabled { opacity: 0.4; cursor: default; }

@@ -5,6 +5,7 @@ import * as git from "../src/git-run";
 import { emptyGitStatus } from "../src/git-status";
 
 const SHA = "b".repeat(40);
+const BLOB = "c".repeat(40);
 afterEach(() => vi.restoreAllMocks());
 
 function fixture() {
@@ -29,7 +30,7 @@ const settle = async () => { for (let i = 0; i < 6; i++) await Promise.resolve()
 
 describe("host-owned turn baselines", () => {
   it.each(["grok", "codex", "claude"] as const)("captures without waiting for %s, behind the same git gate", async provider => {
-    let resolve!: (sha: string) => void;
+    let resolve!: (baseline: git.GitTurnBaseline) => void;
     const capture = vi.spyOn(git, "captureGitTurnBaseline").mockImplementation(() => new Promise(r => { resolve = r; }));
     const { sidebar, session } = fixture();
     session.provider = provider;
@@ -40,10 +41,12 @@ describe("host-owned turn baselines", () => {
     const identity = session.buffer.at(-1) as any;
     expect(identity).toMatchObject({ type: "turnDiffBaseline", cwd: "/repo" });
     expect(identity).not.toHaveProperty("sha");
+    expect(identity).not.toHaveProperty("untracked");
     expect(sidebar.turnDiffBaselines.get(identity.turnId).sha).toBeUndefined();
-    resolve(SHA);
+    resolve({ sha: SHA, untracked: new Map([["a.ts", BLOB]]) });
     await settle();
     expect(sidebar.turnDiffBaselines.get(identity.turnId).sha).toBe(SHA);
+    expect(sidebar.turnDiffBaselines.get(identity.turnId).untracked).toEqual(new Map([["a.ts", BLOB]]));
     expect(sidebar.gitRunGate.isBusy("/repo")).toBe(false);
   });
 
@@ -57,7 +60,7 @@ describe("host-owned turn baselines", () => {
   });
 
   it.each(["toolCall", "toolCallUpdate", "permissionRequest", "new-turn", "session-reset", "turn-end"])("discards a late capture after %s", async event => {
-    let resolve!: (sha: string) => void;
+    let resolve!: (baseline: git.GitTurnBaseline) => void;
     vi.spyOn(git, "captureGitTurnBaseline").mockImplementation(() => new Promise(r => { resolve = r; }));
     const { sidebar, session } = fixture();
     sidebar.startTurnDiffBaseline(session, beginTurn(session));
@@ -66,14 +69,15 @@ describe("host-owned turn baselines", () => {
     else if (event === "session-reset") session.gen++;
     else if (event === "turn-end") session.turnToken = undefined;
     else sidebar.emit(session, { type: event });
-    resolve(SHA);
+    resolve({ sha: SHA, untracked: new Map([["a.ts", BLOB]]) });
     await settle();
     expect(sidebar.turnDiffBaselines.get(identity.turnId).sha).toBeUndefined();
+    expect(sidebar.turnDiffBaselines.get(identity.turnId).untracked).toBeUndefined();
     expect(sidebar.gitRunGate.isBusy("/repo")).toBe(false);
   });
 
   it("bounds memory and never resurrects an evicted pending turn", async () => {
-    let resolve!: (sha: string) => void;
+    let resolve!: (baseline: git.GitTurnBaseline) => void;
     vi.spyOn(git, "captureGitTurnBaseline").mockImplementation(() => new Promise(r => { resolve = r; }));
     const { sidebar, session } = fixture();
     sidebar.startTurnDiffBaseline(session, beginTurn(session));
@@ -84,7 +88,7 @@ describe("host-owned turn baselines", () => {
       sidebar.startTurnDiffBaseline(another, beginTurn(another));
     }
     expect(sidebar.turnDiffBaselines.size).toBe(100);
-    resolve(SHA);
+    resolve({ sha: SHA, untracked: new Map([["a.ts", BLOB]]) });
     await settle();
     expect(sidebar.turnDiffBaselines.has(oldest)).toBe(false);
   });
@@ -146,5 +150,22 @@ describe("turn diff request fences", () => {
     status.mockResolvedValue({ ok: true, snapshot: { ...emptyGitStatus(), files: [{ path: "a.ts", status: "?", added: null, deleted: null }] } });
     await sidebar.onMessage(request, "local");
     expect(diff).toHaveBeenCalledWith("/repo", "a.ts", { baseline: SHA, untracked: true });
+  });
+  it.each(["local", "remote"])("uses the stored blob before consulting status on %s, without exposing it", async origin => {
+    const { sidebar, diff, status, request } = requestFixture();
+    sidebar.turnDiffBaselines.get("turn").untracked = new Map([["a.ts", BLOB]]);
+    await sidebar.onMessage({ ...request, baselineBlob: "--output=evil", untracked: new Map() }, origin, origin === "remote" ? "phone" : undefined);
+    expect(status).not.toHaveBeenCalled();
+    expect(diff).toHaveBeenCalledWith("/repo", "a.ts", { baselineBlob: BLOB });
+    const reply = origin === "local" ? sidebar.post.mock.calls[0][0] : sidebar.sendRemoteRequester.mock.calls[0][1];
+    expect(reply).toEqual({ ...request, type: "turnFileDiffResult", ok: true, patch: "patch", truncated: false });
+  });
+  it("reports a missing mapped file using the existing failure shape", async () => {
+    const { sidebar, diff, status, request } = requestFixture();
+    sidebar.turnDiffBaselines.get("turn").untracked = new Map([["a.ts", BLOB]]);
+    diff.mockResolvedValue({ ok: false, reason: "could not open 'a.ts' for reading" });
+    await sidebar.onMessage(request, "local");
+    expect(status).not.toHaveBeenCalled();
+    expect(sidebar.post).toHaveBeenCalledWith({ ...request, type: "turnFileDiffResult", ok: false, reason: "could not open 'a.ts' for reading" });
   });
 });

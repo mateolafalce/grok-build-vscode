@@ -1,4 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
+import * as fs from "node:fs/promises";
+import { PassThrough } from "node:stream";
 import { gitDiffArgs, gitTurnDiffArgs, GIT_TURN_BASELINE_ARGS, parseGitBaseline } from "../src/git-status";
 import { captureGitTurnBaseline, GIT_BASELINE_TIMEOUT_MS, GIT_DIFF_MAX_BYTES, readGitFileDiff, type GitIo } from "../src/git-run";
 import { parseUnifiedDiff, patchRowsToDiffHunks } from "../media/file-panel.js";
@@ -6,15 +8,23 @@ import { parseWebviewMsg } from "../src/desktop/webview-msg-validate";
 import { INBOUND_DISPOSITION, OUTBOUND_DISPOSITION, OUTBOUND_PROJECT_AUTH, REMOTE_REQUIRES_BOUND_SESSION,
   allowFromRemote, allowRemoteRepoTarget, mayDeliverRemoteHostMsg } from "../src/remote-policy";
 
+vi.mock("node:fs/promises", () => ({ stat: vi.fn() }));
+
 const HEAD = "a".repeat(40);
 const STASH = "b".repeat(40);
+const BLOB = "c".repeat(40);
+afterEach(() => vi.restoreAllMocks());
 
 function fakeGit(replies: Array<{ stdout?: string; error?: unknown }>) {
-  const calls: Array<{ args: string[]; opts: any }> = [];
+  const calls: Array<{ args: string[]; opts: any; input: string }> = [];
   const io: GitIo = { execFile: ((_: string, args: string[], opts: any, cb: Function) => {
-    calls.push({ args, opts });
+    const call = { args, opts, input: "" };
+    calls.push(call);
+    const stdin = new PassThrough();
+    stdin.on("data", chunk => { call.input += chunk.toString(); });
     const reply = replies.shift() || {};
     queueMicrotask(() => cb(reply.error || null, reply.stdout || "", ""));
+    return { stdin };
   }) as any };
   return { io, calls };
 }
@@ -36,9 +46,10 @@ describe("turn baselines", () => {
 
   it("captures stash without updating a ref and uses a bounded hidden process", async () => {
     const { io, calls } = fakeGit([{ stdout: HEAD }, { stdout: STASH + "\n" }]);
-    expect(await captureGitTurnBaseline("/repo", { io })).toBe(STASH);
+    expect(await captureGitTurnBaseline("/repo", { io })).toEqual({ sha: STASH });
     expect(calls.map(c => c.args)).toEqual([
       ["-C", "/repo", "rev-parse", "--verify", "HEAD"], ["-C", "/repo", "stash", "create"],
+      ["-C", "/repo", "ls-files", "--others", "--exclude-standard", "-z", "--full-name"],
     ]);
     for (const { opts } of calls) expect(opts).toMatchObject({
       timeout: GIT_BASELINE_TIMEOUT_MS, windowsHide: true, env: { GIT_OPTIONAL_LOCKS: "0" },
@@ -46,7 +57,7 @@ describe("turn baselines", () => {
   });
   it("uses the captured HEAD only for a successful empty stash", async () => {
     const { io } = fakeGit([{ stdout: HEAD }, {}]);
-    expect(await captureGitTurnBaseline("/repo", { io })).toBe(HEAD);
+    expect(await captureGitTurnBaseline("/repo", { io })).toEqual({ sha: HEAD });
   });
   it.each([
     new Error("index.lock exists"), Object.assign(new Error("timed out"), { killed: true }),
@@ -64,6 +75,58 @@ describe("turn baselines", () => {
     const { io } = fakeGit([{ stdout: HEAD }, { stdout: "oops" }]);
     expect(await captureGitTurnBaseline("/repo", { io })).toBeUndefined();
   });
+  it("stats candidates and hashes survivors in one C-quoted stdin batch, preserving order", async () => {
+    const stat = vi.spyOn(fs, "stat").mockResolvedValue({ isFile: () => true, size: 12 } as any);
+    const paths = ["a[1].ts", "dir/a b.ts", 'quote"slash\\tab\tline\n.ts', "-option.ts", "é.ts"];
+    const { io, calls } = fakeGit([{ stdout: HEAD }, {}, { stdout: paths.join("\0") + "\0" },
+      { stdout: [BLOB, STASH, BLOB, STASH, BLOB].join("\n") + "\n" }]);
+    const baseline = await captureGitTurnBaseline("/repo", { io });
+    expect(stat).toHaveBeenCalledTimes(paths.length);
+    expect(baseline?.untracked).toEqual(new Map(paths.map((path, i) => [path, i % 2 ? STASH : BLOB])));
+    expect(calls[3].args).toEqual(["-C", "/repo", "hash-object", "-w", "--stdin-paths"]);
+    expect(calls[3].input).toBe('"a[1].ts"\n"dir/a b.ts"\n"quote\\042slash\\134tab\\011line\\012.ts"\n"-option.ts"\n"é.ts"\n');
+    expect(calls[3].opts).toMatchObject({ timeout: GIT_BASELINE_TIMEOUT_MS, env: { GIT_OPTIONAL_LOCKS: "0" } });
+  });
+  it("drops missing and non-file candidates before hashing", async () => {
+    vi.spyOn(fs, "stat").mockRejectedValueOnce(new Error("gone"))
+      .mockResolvedValueOnce({ isFile: () => false, size: 0 } as any);
+    const { io, calls } = fakeGit([{ stdout: HEAD }, {}, { stdout: "missing\0directory/\0" }]);
+    expect(await captureGitTurnBaseline("/repo", { io })).toEqual({ sha: HEAD });
+    expect(calls).toHaveLength(3);
+  });
+  it("keeps the tracked baseline when listing fails", async () => {
+    const { io } = fakeGit([{ stdout: HEAD }, {}, { error: new Error("ls-files failed") }]);
+    expect(await captureGitTurnBaseline("/repo", { io })).toEqual({ sha: HEAD });
+  });
+  it.each([
+    { stdout: BLOB }, { stdout: BLOB + "\noops\n" }, { stdout: [BLOB, BLOB, BLOB].join("\n") },
+    { stdout: BLOB + "\n" + BLOB, error: new Error("hash failed") },
+  ])("never records a partial or malformed hash batch: %j", async reply => {
+    vi.spyOn(fs, "stat").mockResolvedValue({ isFile: () => true, size: 12 } as any);
+    const { io } = fakeGit([{ stdout: HEAD }, {}, { stdout: "a.ts\0b.ts\0" }, reply]);
+    expect(await captureGitTurnBaseline("/repo", { io })).toEqual({ sha: HEAD });
+  });
+  it("writes the current blob and diffs objects even when the current status is untracked", async () => {
+    const { io, calls } = fakeGit([{ stdout: BLOB }, { stdout: "patch" }]);
+    expect(await readGitFileDiff("/repo", "-a[1].ts", { io, baseline: HEAD, baselineBlob: STASH, untracked: true }))
+      .toMatchObject({ ok: true, patch: "patch" });
+    expect(calls.map(c => c.args)).toEqual([
+      ["-C", "/repo", "hash-object", "-w", "--", "-a[1].ts"],
+      ["-C", "/repo", "diff", STASH, BLOB],
+    ]);
+    expect(calls[1].opts.maxBuffer).toBe(GIT_DIFF_MAX_BYTES + 1024);
+  });
+  it.each([{ error: new Error("file gone") }, { stdout: "malformed" }])("does not diff when hashing fails: %j", async reply => {
+    const { io, calls } = fakeGit([reply]);
+    expect(await readGitFileDiff("/repo", "a.ts", { io, baselineBlob: STASH }))
+      .toMatchObject({ ok: false, reason: expect.any(String) });
+    expect(calls).toHaveLength(1);
+  });
+  it("returns an unchanged blob as a successful empty patch", async () => {
+    const { io } = fakeGit([{ stdout: BLOB }, {}]);
+    expect(await readGitFileDiff("/repo", "a.ts", { io, baselineBlob: BLOB }))
+      .toMatchObject({ ok: true, patch: "", truncated: false });
+  });
   it("passes only the chosen base to the existing capped diff reader", async () => {
     const { io, calls } = fakeGit([{ stdout: "patch" }]);
     expect(await readGitFileDiff("/repo", "a.ts", { io, baseline: STASH })).toMatchObject({ ok: true, patch: "patch" });
@@ -79,6 +142,12 @@ describe("turn baselines", () => {
 });
 
 describe("parsed patch rows become the existing inline hunk shape", () => {
+  it("renders SHA headers exactly like path headers", () => {
+    const hunk = "@@ -9 +9,2 @@\n before\n+added\n";
+    const blobPatch = `diff --git a/${STASH} b/${BLOB}\nindex ${STASH}..${BLOB} 100644\n--- a/${STASH}\n+++ b/${BLOB}\n${hunk}`;
+    expect(patchRowsToDiffHunks(parseUnifiedDiff(blobPatch)))
+      .toEqual(patchRowsToDiffHunks(parseUnifiedDiff("diff --git a/b.md b/b.md\n--- a/b.md\n+++ b/b.md\n" + hunk)));
+  });
   it("preserves disjoint hunks, line numbers and text while excluding metadata", () => {
     const patch = "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -10,2 +10,2 @@ fn\n-old\n+<new>\n context\n@@ -50 +60 @@\n-away\n+back\n\\ No newline at end of file\n";
     expect(patchRowsToDiffHunks(parseUnifiedDiff(patch))).toEqual([

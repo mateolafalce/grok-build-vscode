@@ -13599,9 +13599,17 @@
 
     const kindLabel = update.kind === "goal" ? "Goal" : "Workflow";
     el.querySelector(".run-progress-kind").textContent = kindLabel;
+    // A goal_updated with no display handle sets `title` to the kind label
+    // itself (src/run-progress.ts), which drew the row as "Goal - Goal". Drop
+    // the redundant half AND its separator -- an emptied span still costs the
+    // row a 6px flex gap.
     const title = update.title || id;
-    el.querySelector(".run-progress-title").textContent = title;
-    el.querySelector(".run-progress-title").title = title;
+    const redundant = title === kindLabel;
+    const titleEl = el.querySelector(".run-progress-title");
+    titleEl.textContent = redundant ? "" : title;
+    titleEl.title = redundant ? "" : title;
+    titleEl.hidden = redundant;
+    el.querySelector(".run-progress-sep").hidden = redundant;
 
     const phase = String(update.phase || "running");
     const pct =
@@ -14648,10 +14656,17 @@
     el.className = "card permission resolved perm-resolved";
     el.innerHTML = "";
     const line = document.createElement("div");
-    line.className = "perm-resolved-line perm-" + (kind === "reject_once" ? "rejected" : "allowed");
+    // ONE test drives both the colour and the word. They used to disagree: a
+    // host-answered card (#61) carries no options, so the kind is unknown here
+    // and the verb fell through to "Answered" while the class ternary landed on
+    // perm-allowed anyway -- a green line that would not say Allowed. The same
+    // split mislabelled a reject_always as allowed. `/reject|deny/i` is the
+    // test resolvePermissionCardEl already uses a few lines below.
+    const rejected = /reject|deny/i.test(String(kind || ""));
+    line.className = "perm-resolved-line perm-" + (rejected ? "rejected" : "allowed");
     const verb = document.createElement("span");
     verb.className = "perm-resolved-verb";
-    verb.textContent = PERM_VERB[kind] || "Answered";
+    verb.textContent = PERM_VERB[kind] || (rejected ? "Rejected" : "Allowed");
     line.appendChild(verb);
     const what = document.createElement("span");
     what.className = "perm-resolved-what";

@@ -291,7 +291,7 @@ import {
   resolveRemoteFileRoot,
   writeRemoteProjectFile,
 } from "./remote-files";
-import { GitRunGate, captureGitTurnBaseline, readGitFileDiff, readGitStatus, runGitPlan } from "./git-run";
+import { GitRunGate, captureGitTurnBaseline, readGitFileDiff, readGitStatus, runGitPlan, type GitTurnBaseline } from "./git-run";
 import { describeGitFailure, isKnownChangedPath, planGitOp } from "./git-status";
 import {
   isCloudEnvironment,
@@ -877,7 +877,7 @@ export class GrokSidebar {
    * describe a tree that no longer exists.
    */
   private readonly gitRunGate = new GitRunGate();
-  private readonly turnDiffBaselines = new Map<string, { root: string; sha?: string }>();
+  private readonly turnDiffBaselines = new Map<string, { root: string } & Partial<GitTurnBaseline>>();
   private readonly pendingTurnDiffCaptures = new WeakSet<object>();
   /** Cold session/load claims the persisted id before ACP has emitted `session`. */
   private readonly sessionLoadReservations = new Map<string, SessionLoadReservation>();
@@ -12429,18 +12429,22 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           fail("This turn's diff is no longer available.");
           break;
         }
-        // Same live path fence as gitFileDiff, even for a known turn identity.
-        const status = await readGitStatus(rootResult.root);
-        if (!status.ok) { fail(status.reason); break; }
-        if (!isKnownChangedPath(status.snapshot, msg.path)) {
-          fail("That file is no longer changed. Refresh and try again.");
-          break;
+        const baselineBlob = baseline.untracked?.get(msg.path);
+        let untracked = false;
+        if (!baselineBlob) {
+          // Paths absent from the host's blob map still need the live fence.
+          // A mapped path is already known: staging cannot change its base,
+          // and deletion must reach hash-object's ordinary failure response.
+          const status = await readGitStatus(rootResult.root);
+          if (!status.ok) { fail(status.reason); break; }
+          if (!isKnownChangedPath(status.snapshot, msg.path)) {
+            fail("That file is no longer changed. Refresh and try again.");
+            break;
+          }
+          untracked = status.snapshot.files.find((file) => file.path === msg.path)?.status === "?";
         }
-        const entry = status.snapshot.files.find((file) => file.path === msg.path);
-        const diff = await readGitFileDiff(rootResult.root, msg.path, {
-          baseline: baseline.sha,
-          untracked: entry?.status === "?",
-        });
+        const diff = await readGitFileDiff(rootResult.root, msg.path, baselineBlob
+          ? { baselineBlob } : { baseline: baseline.sha, untracked });
         if (!diff.ok) { fail(diff.reason); break; }
         reply({ type: "turnFileDiffResult", ...correlation, ok: true, patch: diff.patch, truncated: diff.truncated });
         break;
@@ -12533,7 +12537,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
   private startTurnDiffBaseline(session: Session, turn: object): void {
     const root = this.sessionCwd(session);
     const turnId = randomUUID();
-    const baseline: { root: string; sha?: string } = { root };
+    const baseline: { root: string } & Partial<GitTurnBaseline> = { root };
     this.turnDiffBaselines.set(turnId, baseline);
     // Bound both completed and pending turns. Eviction must never resurrect on completion.
     if (this.turnDiffBaselines.size > 100) {
@@ -12544,10 +12548,11 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     if (!this.gitRunGate.tryAcquire(root)) return;
     const gen = session.gen;
     this.pendingTurnDiffCaptures.add(turn);
-    void captureGitTurnBaseline(root).then((sha) => {
+    void captureGitTurnBaseline(root).then((captured) => {
       if (session.gen === gen && session.turnToken === turn
         && this.pendingTurnDiffCaptures.has(turn) && this.turnDiffBaselines.get(turnId) === baseline) {
-        baseline.sha = sha;
+        baseline.sha = captured?.sha;
+        baseline.untracked = captured?.untracked;
       }
     }).catch(() => {
       // Capture is best effort; an unavailable baseline keeps the tool-row path.

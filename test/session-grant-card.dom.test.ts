@@ -94,5 +94,27 @@ describe("a command allowed for the session arrives answered, not asked", () => 
     expect(line.textContent).toContain("npm ci");
     expect(line.textContent).toContain("auto-approved for this session");
     expect(line.className).toContain("perm-allowed");
+    // And it says ALLOWED, not the neutral "Answered". A host-answered card
+    // carries no options, so the renderer cannot look the kind up — and a
+    // green line whose verb declines to say what happened is the one thing a
+    // grant this wide cannot afford. The word and the colour come off one
+    // test now, so they cannot drift apart again.
+    expect(doc.querySelector(".perm-resolved-verb")!.textContent).toBe("Allowed");
+  });
+
+  it("says Rejected, in reject colours, for an unknown reject kind", () => {
+    // The same split used to mislabel a reject_always as allowed: the class
+    // ternary only recognised reject_once. No host of ours sends
+    // reject_always any more (#154) — an older one still can.
+    const { window, doc } = bootWithSpeech();
+    dispatch(window, { type: "historyBatch", messages: [
+      { type: "permissionRequest", req: { id: 9, toolCall: { toolCallId: "tc9", kind: "execute", title: "rm -rf /" },
+        options: [{ optionId: "never", name: "No, and never ask again", kind: "reject_always" }] } },
+      { type: "permissionResolved", requestId: 9, optionId: "never" },
+    ] });
+
+    const line = doc.querySelector(".perm-resolved-line")!;
+    expect(line.className).toContain("perm-rejected");
+    expect(doc.querySelector(".perm-resolved-verb")!.textContent).toBe("Rejected");
   });
 });
