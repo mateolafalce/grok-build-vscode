@@ -13660,7 +13660,15 @@
         : update.done
           ? (phase === "completed" || phase === "success" ? "done" : phase)
           : phase;
-    phaseEl.textContent = `· ${statusWord}${pct}`;
+    // Underscores are wire syntax. Most phases are single words, but the ones
+    // that arrive when a run ends badly are not — `budget_exceeded`,
+    // `budget_limited`, `accounting_incomplete` — and neither is the
+    // discriminator the parser falls back to when no phase field arrives at
+    // all. The machine value stays on `update.phase`, which the pause/resume
+    // test below still reads; this is only what the row shows.
+    // (src/run-progress.ts documents why this lives here and not there: the
+    // machine value has to survive the trip intact.)
+    phaseEl.textContent = `· ${String(statusWord).replace(/[_-]+/g, " ").trim()}${pct}`;
 
     const sub = el.querySelector(".run-progress-sub");
     if (update.subtitle) {

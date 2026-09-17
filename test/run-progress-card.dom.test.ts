@@ -112,6 +112,39 @@ describe("a live run carries an elapsed clock", () => {
   });
 });
 
+describe("the phase slot shows a word, not a wire identifier", () => {
+  // The other half of "is this the only one?" — the event name is handled in
+  // src/run-progress.ts, but the phase reaches the row raw, and it is
+  // snake_case in exactly the cases that matter most: a run that ran out of
+  // budget, or one whose phase field never arrived so the parser fell back to
+  // the `workflow_*` discriminator.
+  it("spaces out a snake_case terminal phase", () => {
+    const { window, doc } = bootWebview();
+    dispatch(window, {
+      type: "runProgress",
+      update: workflowUpdate({ phase: "budget_exceeded", done: true, failed: true }),
+    });
+    expect(phase(doc, "run-abc")).toBe("· failed");
+
+    dispatch(window, {
+      type: "runProgress",
+      update: workflowUpdate({ id: "run-limited", phase: "budget_limited", done: true }),
+    });
+    expect(phase(doc, "run-limited")).toBe("· budget limited");
+  });
+
+  it("does not disturb the pause control, which reads the machine value", () => {
+    // `/paus/` is tested against update.phase, not against what is on screen,
+    // so humanising the label must not flip Pause to Resume or back.
+    const { window, doc } = bootWebview();
+    dispatch(window, { type: "runProgress", update: workflowUpdate({ phase: "paused_for_review" }) });
+    expect(phase(doc, "run-abc")).toBe("· paused for review");
+    const labels = [...card(doc, "run-abc")!.querySelectorAll(".run-progress-btn")]
+      .map((b) => b.textContent);
+    expect(labels).toEqual(["Resume", "Stop"]);
+  });
+});
+
 describe("the liveness dots cannot be mistaken for a truncated run name", () => {
   // The owner's first look at a card built from REAL captured frames:
   // "those dots in the middle" — they sat immediately after the title, and

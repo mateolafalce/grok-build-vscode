@@ -12,6 +12,72 @@
 
 export type RunProgressKind = "workflow" | "goal";
 
+/**
+ * `last_event` is a Rust enum variant, and the card printed it verbatim —
+ * `phase_entered: Research`, `log: research plan: 3 question(s)`. The owner
+ * read a real one and asked whether we can translate the labels, and whether
+ * this was the only one.
+ *
+ * The answer that scales is not a bigger table. The full vocabulary is NOT
+ * knowable from here: the live capture of 2026-09-17 produced exactly three
+ * values (`workflow_started`, `phase_entered`, `log`) because the run was cut
+ * short after two of four phases, and the binary's string table shows a dozen
+ * more nearby (`agent_spawned`, `agent_finished`, `agents_reserved`,
+ * `subagent_finished`, `phase_transition`, `workflow_paused`, …) without
+ * saying which of them ever land in THIS field. A table alone would keep
+ * leaking Rust for every name we failed to predict.
+ *
+ * So the rule is about the shape, not the vocabulary: the event NAME is
+ * scaffolding and the event DETAIL is the content. An empty label here means
+ * "print the detail alone" — `log:` adds nothing to its own message, and
+ * `phase_entered` restates the phase the row already shows. Anything unknown
+ * falls through {@link eventLabel} and reads as English rather than as a
+ * variant name.
+ */
+const EVENT_LABEL: Record<string, string> = {
+  log: "",
+  phase_entered: "",
+  phase_transition: "",
+  workflow_started: "Started",
+  workflow_paused: "Paused",
+  workflow_resumed: "Resumed",
+  agent_spawned: "Agent started",
+  agent_finished: "Agent finished",
+  agent_completed: "Agent finished",
+  agents_reserved: "Agents reserved",
+  subagent_finished: "Subagent finished",
+  warning: "Warning",
+  error: "Error",
+  retry: "Retrying",
+};
+
+/**
+ * A wire name as a person would read it. Known names get their label (possibly
+ * empty, meaning "the detail speaks for itself"); an unknown one is
+ * sentence-cased, so a future `verification_failed` reads "Verification
+ * failed" instead of shipping a Rust identifier to a phone.
+ */
+function eventLabel(name: string): string {
+  if (Object.prototype.hasOwnProperty.call(EVENT_LABEL, name)) return EVENT_LABEL[name];
+  const words = name.replace(/[_-]+/g, " ").trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : "";
+}
+
+/**
+ * The same problem lives one slot over, which is why "is this the only one?"
+ * is answered "no": the PHASE word reaches the row raw too, and it is
+ * snake_case whenever a run ends badly (`budget_exceeded`, `budget_limited`,
+ * `accounting_incomplete`) or whenever no phase field arrives and the parser
+ * falls back to the `sessionUpdate` discriminator.
+ *
+ * That one is fixed at the RENDER site (media/chat.js, the
+ * `.run-progress-phase` fill) rather than here, and deliberately: `phase` is a
+ * machine value on the way through — DONE_PHASES, the failed/cancelled tests
+ * and the renderer's own pause check all compare against it — so humanising it
+ * in this file would mean either breaking those comparisons or carrying two
+ * spellings of the same field across the wire.
+ */
+
 /** Terminal-ish phases that stop the live dots. */
 const DONE_PHASES = new Set([
   "completed",
@@ -150,8 +216,16 @@ function parseWorkflow(u: Record<string, unknown>, sessionUpdate: string): RunPr
   const detailParts: string[] = [];
   if (pauseMsg) detailParts.push(pauseMsg);
   else if (resultSummary) detailParts.push(resultSummary);
-  else if (lastEvent) detailParts.push(lastDetail ? `${lastEvent}: ${lastDetail}` : lastEvent);
-  else if (agentLabel) detailParts.push(agentLabel);
+  else if (lastEvent) {
+    const label = eventLabel(lastEvent);
+    const text = lastDetail ? (label ? `${label}: ${lastDetail}` : lastDetail) : label;
+    // Not when it only restates the phase. `phase_entered` + detail `Research`
+    // is the commonest frame in a real run by a wide margin, and the row
+    // already carries `· research` two slots to the left — so echoing it fills
+    // the detail line with the one thing the card had already said, and pushes
+    // the agent count to look like the interesting part of a duplicate.
+    if (text && text.toLowerCase() !== phase) detailParts.push(text);
+  } else if (agentLabel) detailParts.push(agentLabel);
 
   // Spend, and it is reported as spend. `agents_used / agent_budget` used to
   // become `progress` here, which the card then drew as a percentage in the

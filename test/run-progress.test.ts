@@ -46,7 +46,12 @@ describe("parseRunProgressUpdate — workflow", () => {
       failed: false,
       displayName: "deep-research-2",
     });
-    expect(u?.detail).toMatch(/agent_started/);
+    // `agent_started` is deliberately NOT in EVENT_LABEL — and is not even in
+    // the CLI binary's string table, so this fixture has always modelled an
+    // event that never arrives. Kept exactly for that: it exercises the
+    // fallback, and shows an unpredicted name reaching the card as English.
+    expect(u?.detail).toMatch(/Agent started: researcher/);
+    expect(u?.detail).not.toMatch(/agent_started/);
     // Spend is reported as spend. `progress` is the completion slot the card
     // prints as a bare `%`, and a workflow has no completion number to put in
     // it — putting agents_used/agent_budget there is what #163 reported.
@@ -67,7 +72,60 @@ describe("parseRunProgressUpdate — workflow", () => {
     });
     expect(u?.progress).toBeUndefined();
     expect(u?.agentBudget).toBeUndefined();
-    expect(u?.detail).toBe("agent_started");
+    expect(u?.detail).toBe("Agent started");
+  });
+
+  // The owner, reading a card built from real captured frames: "phase_entered?
+  // Can't we translate those labels? Is this the only one?" No, it was not —
+  // the phase word leaks the same way, and that half is fixed at the render
+  // site (see media/chat.js and the note in src/run-progress.ts).
+  describe("wire event names do not reach the card", () => {
+    const detailOf = (over: Record<string, unknown>) =>
+      parseRunProgressUpdate({
+        sessionUpdate: "workflow_updated",
+        run_id: "run-real",
+        name: "deep-research",
+        agents_used: 4,
+        agent_budget: 128,
+        ...over,
+      })?.detail;
+
+    // Every case below is a frame shape the 2026-09-17 live capture actually
+    // produced, with the phase it arrived alongside.
+    it("drops `phase_entered`, because the row already shows the phase", () => {
+      expect(detailOf({ current_phase: "Research", last_event: "phase_entered", last_event_detail: "Research" }))
+        .toBe("4/128 agents");
+    });
+
+    it("keeps a phase_entered detail that is NOT the phase on screen", () => {
+      // Same event, different content: only the duplicate is noise.
+      expect(detailOf({ current_phase: "Research", last_event: "phase_entered", last_event_detail: "Verify" }))
+        .toBe("Verify · 4/128 agents");
+    });
+
+    it("prints a `log` message without its own name in front of it", () => {
+      expect(detailOf({
+        current_phase: "Plan", last_event: "log",
+        last_event_detail: "research plan: 3 question(s), capped at 4",
+      })).toBe("research plan: 3 question(s), capped at 4 · 4/128 agents");
+    });
+
+    it("labels a bare `workflow_started`, which carries no detail at all", () => {
+      expect(detailOf({ status: "active", last_event: "workflow_started" })).toBe("Started · 4/128 agents");
+    });
+
+    it("sentence-cases a name nobody predicted, rather than shipping Rust", () => {
+      expect(detailOf({ current_phase: "Verify", last_event: "verification_failed" }))
+        .toBe("Verification failed · 4/128 agents");
+    });
+
+    it("leaves a pause message and a result summary to speak for themselves", () => {
+      // These outrank last_event and are already prose from the CLI.
+      expect(detailOf({ last_event: "log", pause_message: "Waiting for your review" }))
+        .toBe("Waiting for your review · 4/128 agents");
+      expect(detailOf({ last_event: "log", result_summary: "3 sources agreed" }))
+        .toBe("3 sources agreed · 4/128 agents");
+    });
   });
 
   it("marks completed / failed / cancelled terminal", () => {
