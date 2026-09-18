@@ -32,7 +32,7 @@
 
 - **The run card says words, not the machine's vocabulary.** Labels like `phase_entered` and `user_paused` reached the card exactly as the CLI spells them internally. Anything it sends is now shown as ordinary English, including names we have never seen, and an event that only repeats what the card already says is dropped instead of printed twice. The liveness dots also moved off the end of the run's name, where they were indistinguishable from the "…" of a name too long to fit.
 
-- **Controls that could not work are no longer offered on a phone (#160).** An "open diff" on a tool row posted a request only a desk machine can answer, so on a phone or in a browser it did nothing at all — while the diff it would have opened was already on screen directly above it.
+- **Controls that could not work are no longer offered on a phone.** An "open diff" on a tool row posted a request only a desk machine can answer, so on a phone or in a browser it did nothing at all — while the diff it would have opened was already on screen directly above it.
 
 - **A turn from a reloaded conversation explains itself instead of opening the wrong edit.** The per-turn diff baseline lives in memory and does not survive reloading the window, and those rows were quietly falling back to whichever single edit touched the file last — so a file the turn changed three times offered you the third change while the row's own `+/−` counts described all three. Those rows are now plain text, with a line at the bottom of the card saying the diffs are kept only while the session stays open. Hosts without per-turn baselines keep the behaviour they have always had, and say nothing.
 
