@@ -2180,6 +2180,22 @@ describe("Muse settings parity", () => {
     }
   });
 
+  it.each(surfaces)("says whether the account is connected on $name", ({ env }) => {
+    const h = mountAt("providers", { env, snapshot: { providers: [{ id: "muse", connected: true }] } });
+    const row = () => h.root.querySelector('[data-id="providerMuse"]')!;
+    // The remote rows carry no button at all, so this sentence is the only
+    // thing on them that reports state: a phone told to run /login on the host
+    // must be able to see that it worked.
+    expect(row().textContent).toContain("This account is connected");
+    expect(row().textContent).not.toContain("/login");
+    expect(row().textContent).not.toContain("use another provider");
+    h.surface.update({ providers: [{ id: "muse", connected: true, needsLogin: true }] });
+    expect(row().textContent).toContain("needs to sign in again");
+    expect(row().textContent).toContain("Run muse and use /login on the machine running the agent");
+    h.surface.update({ providers: [{ id: "muse", connected: false }] });
+    expect(row().textContent).not.toContain("This account is connected");
+  });
+
   it("explains the cloud limitation without sending someone to an inaccessible terminal", () => {
     const h = mountAt("providers", { env: surfaces[3].env,
       snapshot: { providers: [{ id: "muse", connected: false }] } });

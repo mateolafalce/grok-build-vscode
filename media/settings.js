@@ -1023,10 +1023,24 @@
       title: "Muse Code", vendor: "Meta", description: "", kind: "action", keepOpen: true,
       visible: (s) => !!(s.providers || []).find(p => p.id === "muse"),
       enabled: (s) => !providerOf(s, "muse").unavailableReason,
-      describe: (s, env) => providerOf(s, "muse").unavailableReason
-        || (hostIsCloud(env)
+      // A remote has no button on this row, so this sentence is the only thing
+      // on it that can report state -- and a phone that was just told to run
+      // /login on the host had no other way to learn that it had worked.
+      // `providerDescription` is what every other provider says for exactly
+      // this, including the connected-but-expired case; only the instruction
+      // for the sign-in we cannot perform from here is ours.
+      describe: (s, env) => {
+        const p = providerOf(s, "muse");
+        if (p.unavailableReason) return p.unavailableReason;
+        if (p.connected) {
+          return p.needsLogin === true
+            ? `${providerDescription(p)} Run muse and use /login on the machine running the agent.`
+            : providerDescription(p);
+        }
+        return hostIsCloud(env)
           ? "Muse sign-in is not available from this cloud client; if sign-in is required, use another provider."
-          : "Run muse on the execution host and use /login, then select Check again."),
+          : "Run muse on the execution host and use /login, then select Check again.";
+      },
       actionLabel: (s) => providerOf(s, "muse").connected ? "Sign out" : "Connect",
       message: (s) => ({ type: providerOf(s, "muse").connected ? "logout" : "runGrokLogin", provider: "muse" }),
     },
