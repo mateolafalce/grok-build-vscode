@@ -14652,11 +14652,25 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     // A failed refresh must not fall through to the stale cache — that is how
     // "were not cleared" became a delete. Only providers that checked succeed.
     const adapterHistoryChecked = new Set<AcpProvider>();
+    // A notice is a line in the transcript, and a transcript belongs to ONE
+    // project — so a remark about a project you are not talking in lands in the
+    // wrong conversation. Computed here rather than beside its other use below,
+    // because the skipped-provider warning needs the same gate: cleared from the
+    // rail while reading another project, it otherwise told THAT conversation
+    // that Muse history was kept, without naming the project it meant.
+    const clientCwd = origin === "remote" && clientId ? this.remoteClients.cwd(clientId) : undefined;
+    const inThisConversation = origin !== "remote" || (!!clientCwd && pathsEqual(cwd, clientCwd));
+    // Deliberately true when the provider is merely CONNECTED, not only when
+    // this project is known to hold its conversations. Muse's cache is never
+    // refreshed here — the refresh below runs only for providers that support
+    // session deletion — so an empty cache means "nobody looked", not "nothing
+    // there". Over-warning costs a line nobody needed; under-warning is the
+    // original defect, where history was kept and the dialog said otherwise.
     const skippedProviders = INTERNAL_PROVIDERS.filter((provider) => !supportsHistoryDeletion(provider)
       && (this.connectedProviders().includes(provider)
         || [...this.pool].some(s => s.provider === provider && repoCwdKeys.has(normalizeFsPath(this.sessionCwd(s))))
         || (this.adapterHistory(provider)?.cache.get(projectProviderKey(cwd))?.length ?? 0) > 0));
-    for (const provider of skippedProviders) {
+    if (inThisConversation) for (const provider of skippedProviders) {
       this.reportRequester(
         origin === "remote" && clientId ? this.captureRemoteRequester(clientId) : undefined,
         "warning",
@@ -14703,12 +14717,9 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       (entry) => protectedIds.has(entry.id) && entry.id !== requesterId,
     );
     const clearableCount = allEntries.filter((entry) => !protectedIds.has(entry.id)).length;
-    // A notice is a line in the transcript, and a transcript belongs to ONE
-    // project — so a remark about a project you are not talking in lands in the
-    // wrong conversation. Where the rail is the thing that asked, the refreshed
-    // rail is the answer: the project shows itself empty, in its own place.
-    const clientCwd = origin === "remote" && clientId ? this.remoteClients.cwd(clientId) : undefined;
-    const inThisConversation = origin !== "remote" || (!!clientCwd && pathsEqual(cwd, clientCwd));
+    // Where the rail is the thing that asked, the refreshed rail is the answer:
+    // the project shows itself empty, in its own place. (`inThisConversation` is
+    // computed above, where the skipped-provider warning also needs it.)
     if (clearableCount === 0) {
       if (keptForAnotherOwner) this.reportProtectedSession(origin, clientId, "clear");
       else if (inThisConversation && !skippedProviders.length) this.reportRequester(
