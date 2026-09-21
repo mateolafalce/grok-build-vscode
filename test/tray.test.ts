@@ -218,6 +218,30 @@ describe("main.ts actually consults the guards (#174)", () => {
     expect(handler).toContain("destroyTray()");
   });
 
+  /**
+   * The gap `before-quit` does not cover, and the reason it is worth a test of
+   * its own: Electron documents that event as NOT emitted on Windows for a
+   * shutdown, restart or logout — which is the one platform where the tray is
+   * on by default. Without a second setter, a person who closed the window to
+   * the tray and then shut their machine down would find the shutdown held up
+   * by an app they thought they had closed.
+   *
+   * It is invisible in review because the close handler reads correct: the bug
+   * is in an event that never arrives.
+   */
+  it("also sets the quitting flag on the Windows session-end", () => {
+    const at = src.indexOf('mainWindow.on("session-end"');
+    expect(at).toBeGreaterThan(-1);
+    const handler = src.slice(at, src.indexOf('mainWindow.on("closed"', at));
+    expect(handler).toContain("appIsQuitting = true");
+    expect(handler).toContain("destroyTray()");
+    // And it has to run before the close it precedes can be cancelled — which
+    // is only true if the handler is registered at all, hence the assertion
+    // above rather than a behavioural one. Nothing here may preventDefault:
+    // refusing the session end is the bug, not the fix.
+    expect(handler).not.toContain("preventDefault");
+  });
+
   it("rebuilds the tray when the setting changes, rather than on next launch", () => {
     expect(src).toContain("affectsConfiguration(TRAY_CONFIG_FULL_KEY)");
     expect(src).toContain("syncTray()");

@@ -62,11 +62,16 @@ export function trayEnabled(opts: {
  * Whether a window close should hide to the tray instead of closing.
  *
  * `quitting` is the one that matters and is easy to forget: Quit from the tray
- * menu, the app menu, a Windows shutdown and the auto-updater's relaunch all
- * arrive as `before-quit` followed by a window close. Without this the close
- * would be cancelled and the app would refuse to exit — a process the person
- * can only kill from Task Manager, which is a far worse bug than the one the
- * tray fixes.
+ * menu, the app menu and the auto-updater's relaunch all arrive as
+ * `before-quit` followed by a window close. Without this the close would be
+ * cancelled and the app would refuse to exit — a process the person can only
+ * kill from Task Manager, which is a far worse bug than the one the tray fixes.
+ *
+ * A Windows shutdown, restart or logout does NOT arrive that way: Electron
+ * documents `before-quit` as not emitted for it. The caller must therefore set
+ * `quitting` from the window's Windows-only `session-end` event as well — miss
+ * that and closing to the tray leaves the app holding up the machine's
+ * shutdown, on the one platform where the tray is on by default.
  *
  * `trayPresent` is the other one, and it is not the same question as
  * `trayEnabled`. Constructing a Tray throws on a Linux session with no

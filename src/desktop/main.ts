@@ -301,13 +301,17 @@ let sidebar: GrokSidebar | null = null;
 let webview: ElectronWebview | null = null;
 let tray: Tray | null = null;
 /**
- * Set by `before-quit`, read by the window's `close` handler.
+ * Set by `before-quit` and by the window's `session-end`, read by the window's
+ * `close` handler.
  *
- * Every real exit — the tray's Quit, the app menu, a Windows session end, the
- * updater's relaunch — is a `before-quit` followed by a window close. Without
- * this flag the close handler would cancel that close and the app could not be
- * quit at all except from Task Manager, which is much worse than the problem
- * the tray solves.
+ * Most real exits — the tray's Quit, the app menu, the updater's relaunch —
+ * are a `before-quit` followed by a window close. Without this flag the close
+ * handler would cancel that close and the app could not be quit at all except
+ * from Task Manager, which is much worse than the problem the tray solves.
+ *
+ * A Windows shutdown, restart or logout is the exception, and it needs the
+ * second setter: Electron does not emit `before-quit` for it at all. See the
+ * `session-end` handler next to the `close` one.
  */
 let appIsQuitting = false;
 /** Set in createApp; the tray's decisions and the one-shot notice read it. */
@@ -823,6 +827,25 @@ async function createApp(): Promise<void> {
     event.preventDefault();
     mainWindow?.hide();
     announceTrayOnce();
+  });
+
+  /**
+   * The gap `before-quit` does not cover. Electron's own note on that event:
+   * "On Windows, this event will not be emitted if the app is closed due to a
+   * shutdown/restart of the system or a user logout." So on the one platform
+   * where the tray is on by default, the flag the close handler reads would
+   * still say false while Windows was trying to shut down — the close would be
+   * cancelled, the window would hide, and the machine would sit waiting on an
+   * app the person had already closed.
+   *
+   * `session-end` is the Windows-only signal for exactly that case, and it
+   * fires before the window is closed, so setting the same flag is the whole
+   * fix. The tray goes with it: nothing should be left in the notification
+   * area of a session that is ending.
+   */
+  mainWindow.on("session-end", () => {
+    appIsQuitting = true;
+    destroyTray();
   });
 
   mainWindow.on("closed", () => {
