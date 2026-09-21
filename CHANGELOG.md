@@ -10,7 +10,7 @@
 
   **On Windows the row appears and explains that it cannot run**, because Meta ships no native Windows binary. The platform that decides is the one the agent runs on, not the one you are looking at — so a Windows browser driving a Mac offers Muse normally.
 
-  **Sign-in is at the desk for now.** Muse connects from a terminal on the machine running the agent; the other three can also be connected from a phone or browser.
+  **Sign in from wherever you are.** `muse login` turns out to be an ordinary device-code flow, so Muse connects the same way the other three do: the machine running the agent starts the login, and Meta's link and short code arrive on whichever screen asked for them — a phone, a browser, or the editor at your desk.
 
   Two of the models Muse offers are marked *contributor*, and one of them is Muse's own default. Muse's description is passed through to the picker exactly as Meta writes it: "Your content, including inter-session messages, may be used for product improvement." Worth reading before you pick one.
 
