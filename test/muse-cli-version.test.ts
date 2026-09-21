@@ -24,6 +24,8 @@ beforeEach(() => exec.mockReset());
 
 describe("Muse CLI version reporting", () => {
   it.each([
+    // What the installed 1.3.0 launcher actually prints, read off a cloud host.
+    ["Muse Code 1.3.0 (1.3.0-R3401.1)\n", "1.3.0-R3401.1"],
     ["muse 1.3.0-R3401.1\n", "1.3.0-R3401.1"],
     ["1.3.0", "1.3.0"],
     ["Muse Code v1.3.0", "1.3.0"],

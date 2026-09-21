@@ -149,9 +149,11 @@ Hover a message you sent → **Rewind** (or **Grok: Rewind Conversation**), conf
 </details>
 
 <details>
-<summary><strong>Deep Research / Workflow progress</strong> — a live progress card with Pause / Resume / Stop</summary>
+<summary><strong>Deep Research / Workflow progress</strong> — a card that pins above the composer, with Pause / Resume / Stop</summary>
 
 When Grok runs a Deep Research, Workflow, or Goal task, a progress card streams its steps live and gives you **Pause**, **Resume**, and **Stop** controls, so long autonomous runs stay visible and interruptible.
+
+A running **workflow** pins itself just above the composer so it cannot scroll out of reach, and leaves a one-line marker in the transcript rather than a second copy of itself. Collapsed it shows the name, one dot per reported step with the current one marked, the phase, elapsed time and how long ago the last frame arrived; agents that have failed, been cancelled, or are waiting on a permission prompt are named there too, because a stuck run keeps its frames arriving. Tap it for the labelled phase strip, the agent budget and one row per agent, each of which opens for what that agent has actually done. When the run finishes the pin goes and the transcript marker becomes the report.
 
 </details>
 
