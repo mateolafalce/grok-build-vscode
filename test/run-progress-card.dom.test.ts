@@ -36,7 +36,16 @@ describe("approved workflow states", () => {
     const h = boot(options);
     expect(h.doc.querySelector(".workflow-pin")).toBeNull();
     send(h);
-    expect(pin(h).previousElementSibling).toBe(h.doc.getElementById("messages"));
+    // Inside the composer, ahead of everything in it. The scroll-to-bottom pill
+    // and the previous-prompt circle are absolutely positioned against the
+    // composer's padding box, so a pin that is merely a SIBLING of the composer
+    // sits underneath both of them.
+    expect(pin(h).parentElement).toBe(h.doc.querySelector(".composer"));
+    expect(pin(h).previousElementSibling).toBeNull();
+    // The controls are the card's last row, not passengers in the heading:
+    // sharing that row clipped "Stop" off the right edge of a phone.
+    expect(pin(h).querySelector(".workflow-heading .run-progress-actions")).toBeNull();
+    expect(pin(h).querySelector(".workflow-pin-run > :last-child")!.className).toBe("run-progress-actions");
     expect(pin(h).querySelector(".workflow-pin-toggle")!.getAttribute("aria-expanded")).toBe("false");
     expect(summary(h)).toContain("deep-research");
     expect(summary(h)).toContain("Research");

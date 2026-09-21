@@ -13848,8 +13848,8 @@
     const u = record.update;
     if (!el.firstChild) {
       const headingTag = u.done ? "div" : "button";
-      el.innerHTML = `<div class="workflow-heading"><${headingTag} class="workflow-pin-toggle run-progress-row"><span class="run-progress-title"></span><span class="workflow-dots" hidden></span><span class="run-progress-phase"></span><span class="run-progress-elapsed" hidden></span><span class="workflow-chevron" aria-hidden="true"></span></${headingTag}><div class="run-progress-actions"></div></div>` +
-        `<div class="workflow-receipt"></div><div class="workflow-blocked" hidden></div><div class="workflow-expanded" hidden><ol class="workflow-phases" hidden></ol><div class="run-progress-sub" hidden></div><div class="run-progress-detail" hidden></div><div class="workflow-spend" hidden></div><ul class="workflow-roster" hidden></ul></div>`;
+      el.innerHTML = `<div class="workflow-heading"><${headingTag} class="workflow-pin-toggle run-progress-row"><span class="run-progress-title"></span><span class="workflow-dots" hidden></span><span class="run-progress-phase"></span><span class="run-progress-elapsed" hidden></span><span class="workflow-chevron" aria-hidden="true"></span></${headingTag}></div>` +
+        `<div class="workflow-receipt"></div><div class="workflow-blocked" hidden></div><div class="workflow-expanded" hidden><ol class="workflow-phases" hidden></ol><div class="run-progress-sub" hidden></div><div class="run-progress-detail" hidden></div><div class="workflow-spend" hidden></div><ul class="workflow-roster" hidden></ul></div><div class="run-progress-actions"></div>`;
       if (!u.done) el.querySelector(".workflow-pin-toggle").onclick = () => {
         record.expanded = !record.expanded;
         syncWorkflowPin();
@@ -14041,7 +14041,15 @@
       workflowPin.className = "workflow-pin";
       workflowPin.setAttribute("aria-label", "Live workflows");
       workflowText(workflowPin, "workflow-pin-runs", "");
-      messagesEl.parentNode.insertBefore(workflowPin, messagesEl.nextSibling);
+      // INSIDE the composer, not between it and the transcript. The
+      // scroll-to-bottom pill and the previous-prompt circle are absolutely
+      // positioned against the composer's padding box, so a pin that is a
+      // SIBLING lands underneath both: the pill sat across the receipt line and
+      // the circle on top of Stop. As a child it lifts them by its own height,
+      // whatever that height is, collapsed or expanded, on every surface.
+      const composer = document.querySelector(".composer");
+      if (composer) composer.insertBefore(workflowPin, composer.firstChild);
+      else messagesEl.parentNode.insertBefore(workflowPin, messagesEl.nextSibling);
     }
     workflowPin.classList.toggle("is-expanded", records.some((r) => r.expanded));
     const stack = workflowPin.querySelector(".workflow-pin-runs");

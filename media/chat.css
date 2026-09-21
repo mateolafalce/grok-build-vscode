@@ -2725,9 +2725,9 @@ body.thinking-hidden .msg.thinking { display: none; }
   max-height: 34vh;
   display: flex;
   flex-direction: column;
-  border-top: 1px solid var(--vscode-editorWidget-border, #555);
-  background: var(--vscode-sideBar-background);
-  padding: 4px var(--pad);
+  /* No rule and no fill of its own: the card below carries the chrome, and the
+     composer this now sits inside already supplies the side gutter. */
+  padding: 0 0 var(--pad);
 }
 .workflow-pin.is-expanded { max-height: 45vh; }
 .workflow-pin-toggle {
@@ -2744,7 +2744,16 @@ body.thinking-hidden .msg.thinking { display: none; }
   cursor: pointer;
 }
 .workflow-pin-runs { min-height: 0; overflow: auto; overscroll-behavior: contain; }
-.workflow-pin-run { margin: 4px 0; }
+/* The pinned card's own numbers. `.run-progress-card` gives every progress
+   card a fill, a left accent rail and a radius at the transcript's tighter
+   density; a card sitting on top of the composer gets room to breathe. */
+.workflow-pin-run {
+  margin: 0 0 6px;
+  padding: 10px 11px;
+  border-left-width: 3px;
+  border-radius: 6px;
+}
+.workflow-pin-run:last-child { margin-bottom: 0; }
 .workflow-expanded[hidden], .workflow-dots[hidden], .workflow-phases[hidden], .workflow-roster[hidden], .workflow-agent-detail[hidden], .workflow-blocked[hidden] { display: none; }
 /* Reads immediately under the receipt, because it is what qualifies it. */
 .workflow-blocked { color: var(--vscode-editorWarning-foreground, #cca700); }
@@ -2783,13 +2792,22 @@ body.thinking-hidden .msg.thinking { display: none; }
 .workflow-phase[data-state="completed"]::before { content: "✓ "; }
 .workflow-phase[data-state="done"],
 .workflow-phase[data-state="completed"] { border-color: var(--vscode-charts-green, #4ec9b0); }
-.workflow-heading { display: flex; align-items: flex-start; gap: 6px; }
-.workflow-pin-run > .workflow-heading { position: sticky; top: 0; z-index: 1; background: var(--vscode-sideBar-background); }
-.workflow-heading > .workflow-pin-toggle { position: relative; flex: 1; margin: 0; padding: 0; }
-.workflow-heading .run-progress-actions { flex: none; margin: 0; }
+/* Name, steps and stage on the left; elapsed and the chevron on the right; the
+   controls on their OWN row at the foot of the card. Pause and Stop used to
+   share this row, which clipped "Stop" off the right edge of a phone, and the
+   chevron hung below it on top of the receipt line. */
+.workflow-heading { display: block; }
+.workflow-pin-run > .workflow-heading { position: sticky; top: 0; z-index: 1; background: var(--vscode-textBlockQuote-background, rgba(55, 148, 255, 0.08)); }
+.workflow-heading > .workflow-pin-toggle { display: flex; width: 100%; margin: 0; padding: 0; }
+.workflow-heading .run-progress-row { align-items: center; gap: 9px; }
+.workflow-chevron { flex: none; opacity: 0.7; font-size: 0.9em; }
 .workflow-chevron::before { content: "⌄"; }
-.workflow-chevron { position: absolute; right: 0; top: 100%; }
 .is-expanded > .workflow-heading .workflow-chevron::before { content: "⌃"; }
+.workflow-pin .workflow-receipt { margin-top: 3px; }
+/* The composer is directly below, so the controls need a real target and air
+   above them rather than the transcript card's 6px. */
+.workflow-pin .run-progress-actions { margin-top: 9px; gap: 7px; }
+.workflow-pin .run-progress-btn { padding: 5px 12px; border-radius: 6px; }
 /* Wraps because a phase list is not always four steps — a long one would
    otherwise run the heading off a 320px screen. */
 .workflow-dots { display: inline-flex; flex-wrap: wrap; gap: 5px; align-items: center; }
