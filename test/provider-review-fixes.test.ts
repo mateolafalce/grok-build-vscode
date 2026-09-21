@@ -232,7 +232,11 @@ describe("multi-provider review regressions", () => {
   });
 
   it("freezes adapter listing time on first discovery for Codex and Claude", () => {
-    const body = methodBody("private async refreshAdapterHistory(");
+    // The listing moved out of `refreshAdapterHistory` when history stopped
+    // spawning a process per repo: that method now only queues, and this is
+    // the half that reads the catalog. The assertions are unchanged — no
+    // provider carve-out on the pin — only the method that must satisfy them.
+    const body = methodBody("private async listAdapterHistory(");
     expect(body).toContain("if (typeof previous.activeAt === \"number\") continue");
     expect(body).toContain("activeAt: adapterListEntry(entry, {}, provider, Date.now()).updatedAt");
     // No provider carve-out — Claude restamps on load, same pin Codex already had.

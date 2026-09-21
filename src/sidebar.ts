@@ -781,6 +781,14 @@ export class GrokSidebar {
   private claudeSessionCache = new Map<string, SessionListEntry[]>();
   private claudeSessionCacheAt = new Map<string, number>();
   private claudeSessionRefresh = new Map<string, Promise<void>>();
+  /**
+   * One history process per PROVIDER, reused across every repo — not one per
+   * repo, which is what the projects rail used to cost. `adapterHistoryClient`
+   * carries the measurement that makes a single process sufficient.
+   */
+  private adapterHistoryClients = new Map<AcpProvider, { cliPath: string; client: AcpClient }>();
+  /** Serialises history listings onto that shared process, per provider. */
+  private adapterHistoryQueue = new Map<AcpProvider, Promise<void>>();
   private codexInstallAbort?: AbortController;
   private providerConnectionState: ProviderConnections = {};
   /**
@@ -1717,6 +1725,9 @@ export class GrokSidebar {
     if (!connected && isAdapterProvider(provider)) {
       const history = this.adapterHistory(provider);
       history?.cache.clear();
+      // The listener outlives a single listing now, so dropping the rows is no
+      // longer enough — the process itself has to go with them.
+      void this.disposeAdapterHistoryClient(provider);
       // A reconnect must re-list immediately. Keeping the old freshness stamp
       // after dropping the rows creates a fresh-but-empty cache for ten seconds.
       history?.at.clear();
@@ -8744,6 +8755,9 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     try { this.settingsEditor?.dispose(); } catch { /* tab already gone */ }
     this.settingsEditor = undefined;
     void this.disposePool();
+    for (const provider of [...this.adapterHistoryClients.keys()]) {
+      void this.disposeAdapterHistoryClient(provider);
+    }
     this.editorWatcher?.dispose();
     this.configWatcher?.dispose();
     this.terminalManager.disposeAll();
@@ -9360,6 +9374,10 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       await (provider === "codex" ? this.codexVersionProbe : this.claudeVersionProbe);
       await Promise.all(this.providerModelProbes?.get(provider) ?? []);
       await Promise.all(this.adapterHistory(provider)?.refresh?.values() ?? []);
+      // The history listener is a LONG-LIVED process now, one per provider
+      // rather than one per listing, so it outlives the drain above and holds
+      // the binary exactly as those throwaways did. Await its real exit.
+      await this.disposeAdapterHistoryClient(provider, true);
       const closing = affected().map((session) => {
         stopped.push(session);
         const client = this.detachClient(session);
@@ -13435,13 +13453,35 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     return this.refreshAdapterHistory("codex", cwd, key);
   }
 
-  private async refreshAdapterHistory(provider: AcpProvider, cwd: string, key = projectProviderKey(cwd)): Promise<void> {
-    if (this.providerCliUpdate?.provider === provider) return;
-    if (!isAdapterProvider(provider)) return;
-    const history = this.adapterHistory(provider);
-    const cliPath = this.locateProvider(provider);
+  /**
+   * The shared history process for a provider, started on first use.
+   *
+   * A listing never needed a process of its own. Measured against both real
+   * adapters, 2026-09-21: **codex sends no cwd on the wire at all** — its
+   * `session/list` returns an unscoped catalog that `codex-backend.ts` filters
+   * locally, and a process spawned in one repo duly returned sessions for
+   * eight others — while **claude takes `cwd` as a per-call parameter and
+   * honours it**: asked from a process spawned in `grok-remote` for a different
+   * checkout, it returned that checkout's 69 sessions and nothing else, with no
+   * leakage in either direction. For both, the process's own spawn cwd is
+   * irrelevant to the answer, so one process can serve every repo on the rail.
+   *
+   * What that buys: opening the app with five projects spawned TEN adapters in
+   * 400ms, each living ~25s and re-arming for as long as the rail was on
+   * screen. It is two now, and they are reused.
+   *
+   * What it costs, and the reason for the exit handler: a shared process is a
+   * shared failure domain. When it dies the handle is dropped, so the next
+   * listing starts a fresh one rather than talking to a corpse.
+   */
+  private async adapterHistoryClient(provider: AcpProvider, cliPath: string, cwd: string): Promise<AcpClient | undefined> {
+    const existing = this.adapterHistoryClients.get(provider);
+    if (existing && existing.cliPath === cliPath) return existing.client;
+    // A relocated or upgraded CLI is a different program. Never keep talking to
+    // the old one just because it is still answering.
+    if (existing) void this.disposeAdapterHistoryClient(provider);
     const backend = this.createProviderBackend(provider);
-    if (!history || !cliPath || !backend || !this.connectedProviders().includes(provider)) return;
+    if (!backend) return undefined;
     const client = new AcpClient({
       cliPath,
       cwd,
@@ -13449,62 +13489,113 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       backend,
       log: (message) => this.host.appendLine(message),
     });
+    client.on("exit", () => {
+      if (this.adapterHistoryClients.get(provider)?.client === client) {
+        this.adapterHistoryClients.delete(provider);
+      }
+    });
     try {
       await client.start();
-      const result = await client.listSessions(cwd, process.platform);
-      const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
-      const stableOverrides: SessionMetaOverrides = { ...overrides };
-      // First-seen adapter listing time is a baseline only. Claude restamps
-      // `updatedAt` on `session/load` (measured). Codex does not restamp, but
-      // pinning is still what we want: an open must not promote the row.
-      // Trade-off: work done outside this extension stops promoting the row.
-      // Unlike grok, neither adapter has a load-stable on-disk file to rank by.
-      for (const entry of result.sessions) {
-        const previous = stableOverrides[entry.sessionId] ?? {};
-        if (typeof previous.activeAt === "number") continue;
-        stableOverrides[entry.sessionId] = {
-          ...previous,
-          activeAt: adapterListEntry(entry, {}, provider, Date.now()).updatedAt,
-        };
-      }
-      const entries = result.sessions.map((entry) => adapterListEntry(entry, stableOverrides, provider));
-      // Same reasoning as startSession's: listing sessions reads this machine's
-      // own files and succeeds with any token at all. On the owner's host a
-      // phone reconnect swept four project folders at 10:05:40, spawning an
-      // adapter per folder, and each success wiped the needs-login the failing
-      // conversation had just raised. The catch below still LOWERS the verdict
-      // from a listing -- a listing that fails with a credential error is real
-      // evidence -- but a listing that succeeds is evidence of nothing.
-      // (Kept on the grok/probe paths, which make a call the account must
-      // authorize; this one does not.)
-      history.cache.set(key, entries);
-      history.at.set(key, Date.now());
-      await this.updateSessionMeta((current) => {
-        let changed = false;
-        const next = { ...current };
-        for (const entry of result.sessions) {
-          const previous = next[entry.sessionId] ?? {};
-          const title = typeof entry.title === "string" ? entry.title.trim() : "";
-          const autoName = capAutoName(title);
-          const updated = {
-            ...previous,
-            provider,
-            providerCwd: entry.cwd,
-            activeAt: typeof previous.activeAt === "number"
-              ? previous.activeAt
-              : stableOverrides[entry.sessionId]?.activeAt,
-            ...(!previous.customName && autoName ? { autoName } : {}),
-          };
-          if (JSON.stringify(updated) !== JSON.stringify(previous)) {
-            next[entry.sessionId] = updated;
-            changed = true;
-          }
-        }
-        return changed ? next : null;
-      });
-    } finally {
-      await client.dispose();
+    } catch (error) {
+      void client.dispose();
+      throw error;
     }
+    this.adapterHistoryClients.set(provider, { cliPath, client });
+    return client;
+  }
+
+  /**
+   * Drop a provider's shared history process — disconnect, CLI change, shutdown.
+   *
+   * `forUpdate` awaits the process actually exiting rather than merely
+   * signalling it. That matters only on the CLI-update path, and it matters
+   * there because this process is no longer a throwaway: the probes drained
+   * alongside it are torn down for the same reason, since a live one keeps the
+   * binary locked on Windows and the replacement fails.
+   */
+  private disposeAdapterHistoryClient(provider: AcpProvider, forUpdate = false): Promise<void> {
+    const entry = this.adapterHistoryClients.get(provider);
+    if (!entry) return Promise.resolve();
+    this.adapterHistoryClients.delete(provider);
+    return forUpdate ? entry.client.disposeForUpdate() : entry.client.dispose();
+  }
+
+  private async refreshAdapterHistory(provider: AcpProvider, cwd: string, key = projectProviderKey(cwd)): Promise<void> {
+    if (this.providerCliUpdate?.provider === provider) return;
+    if (!isAdapterProvider(provider)) return;
+    if (!this.adapterHistory(provider) || !this.locateProvider(provider)) return;
+    if (!this.connectedProviders().includes(provider)) return;
+    // Queued rather than concurrent: the rail asks for every repo at once and
+    // they now share one process, so the opening burst becomes N cheap round
+    // trips instead of N spawns. A previous listing's failure belongs to its
+    // own caller and must not break the chain for the next one.
+    const run = (this.adapterHistoryQueue.get(provider) ?? Promise.resolve())
+      .catch(() => { /* handled by whoever awaited it */ })
+      .then(() => this.listAdapterHistory(provider, cwd, key));
+    this.adapterHistoryQueue.set(provider, run.catch(() => { /* keep the chain alive */ }));
+    return run;
+  }
+
+  private async listAdapterHistory(provider: AcpProvider, cwd: string, key: string): Promise<void> {
+    const history = this.adapterHistory(provider);
+    // Re-checked here, not only at queue time: a provider can be disconnected
+    // or its CLI replaced while this call was waiting its turn.
+    const cliPath = this.locateProvider(provider);
+    if (!history || !cliPath || !this.connectedProviders().includes(provider)) return;
+    if (this.providerCliUpdate?.provider === provider) return;
+    const client = await this.adapterHistoryClient(provider, cliPath, cwd);
+    if (!client) return;
+    const result = await client.listSessions(cwd, process.platform);
+    const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});
+    const stableOverrides: SessionMetaOverrides = { ...overrides };
+    // First-seen adapter listing time is a baseline only. Claude restamps
+    // `updatedAt` on `session/load` (measured). Codex does not restamp, but
+    // pinning is still what we want: an open must not promote the row.
+    // Trade-off: work done outside this extension stops promoting the row.
+    // Unlike grok, neither adapter has a load-stable on-disk file to rank by.
+    for (const entry of result.sessions) {
+      const previous = stableOverrides[entry.sessionId] ?? {};
+      if (typeof previous.activeAt === "number") continue;
+      stableOverrides[entry.sessionId] = {
+        ...previous,
+        activeAt: adapterListEntry(entry, {}, provider, Date.now()).updatedAt,
+      };
+    }
+    const entries = result.sessions.map((entry) => adapterListEntry(entry, stableOverrides, provider));
+    // Same reasoning as startSession's: listing sessions reads this machine's
+    // own files and succeeds with any token at all. On the owner's host a
+    // phone reconnect swept four project folders at 10:05:40, spawning an
+    // adapter per folder, and each success wiped the needs-login the failing
+    // conversation had just raised. The catch below still LOWERS the verdict
+    // from a listing -- a listing that fails with a credential error is real
+    // evidence -- but a listing that succeeds is evidence of nothing.
+    // (Kept on the grok/probe paths, which make a call the account must
+    // authorize; this one does not.)
+    history.cache.set(key, entries);
+    history.at.set(key, Date.now());
+    await this.updateSessionMeta((current) => {
+      let changed = false;
+      const next = { ...current };
+      for (const entry of result.sessions) {
+        const previous = next[entry.sessionId] ?? {};
+        const title = typeof entry.title === "string" ? entry.title.trim() : "";
+        const autoName = capAutoName(title);
+        const updated = {
+          ...previous,
+          provider,
+          providerCwd: entry.cwd,
+          activeAt: typeof previous.activeAt === "number"
+            ? previous.activeAt
+            : stableOverrides[entry.sessionId]?.activeAt,
+          ...(!previous.customName && autoName ? { autoName } : {}),
+        };
+        if (JSON.stringify(updated) !== JSON.stringify(previous)) {
+          next[entry.sessionId] = updated;
+          changed = true;
+        }
+      }
+      return changed ? next : null;
+    });
     this.postSessionsList();
     this.sendLocalRepoSessionsPreview(cwd);
   }
