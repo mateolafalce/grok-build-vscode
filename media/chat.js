@@ -11822,6 +11822,7 @@
     search: `<svg class="tool-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v3.5"/><circle cx="16.5" cy="16.5" r="2.5"/><path d="M21 21l-1.6-1.6"/></svg>`,
     pencil: `<svg class="tool-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.17 6.81a1 1 0 0 0-3.98-3.99L3.84 16.17a2 2 0 0 0-.5.83l-1.32 4.35a.5.5 0 0 0 .62.62l4.35-1.32a2 2 0 0 0 .83-.5z"/><path d="M15 5l4 4"/></svg>`,
     terminal: `<svg class="tool-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m7 11 2-2-2-2"/><path d="M11 13h4"/></svg>`,
+    workflow: `<svg class="tool-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="8" height="8" x="3" y="3" rx="2"/><path d="M7 11v4a2 2 0 0 0 2 2h4"/><rect width="8" height="8" x="13" y="13" rx="2"/></svg>`,
   };
   function toolIconRank(call) {
     const k = toolKind(call);
@@ -13829,9 +13830,12 @@
       if (!record) continue;
       for (const surface of [el, record.pin].filter((surface) => surface?.isConnected)) {
         const receipt = surface.querySelector(".workflow-receipt");
-        if (receipt) receipt.textContent = record.receivedAt == null
-          ? "historical workflow update"
-          : `updated ${formatCount(Math.max(0, Math.floor((Date.now() - record.receivedAt) / 1000)))}s ago`;
+        // Three distinct facts, never one standing in for another: a frame
+        // arrived just now, a frame arrived before this view existed (replay),
+        // and this is a finished run being read back.
+        if (receipt) receipt.textContent = record.receivedAt != null
+          ? `updated ${formatCount(Math.max(0, Math.floor((Date.now() - record.receivedAt) / 1000)))}s ago`
+          : record.update.done ? "historical workflow update" : "no update since this view opened";
         for (const row of surface.querySelectorAll(".workflow-agent")) {
           const agent = record.update.agents[Number(row.dataset.agentIndex)];
           row.querySelector(".workflow-agent-activity").textContent = workflowAgentActivity(record, agent);
@@ -13956,8 +13960,11 @@
 
     const actions = el.querySelector(".run-progress-actions");
     const paused = /paus/i.test(u.phase || "");
-    const reason = record.receivedAt == null ? "Controls unavailable for historical updates"
-      : !u.displayName ? "Controls unavailable: no workflow handle reported"
+    // Deliberately NOT gated on `receivedAt`. The handle is what a control
+    // needs, and the host owns the run either way -- a Stop for a run that has
+    // since ended is ignored there, while greying the controls out on a live
+    // run a phone joined is the out-of-reach complaint this card was built for.
+    const reason = !u.displayName ? "Controls unavailable: no workflow handle reported"
       : !/^[\w.:-]+$/.test(u.displayName) ? "Controls unavailable: invalid workflow handle" : "";
     // Preserve focused controls and pending pointer clicks across rollup frames.
     const controlsKey = JSON.stringify([u.done, paused, u.displayName, reason]);
@@ -13989,7 +13996,10 @@
     if (!u.done) {
       el.replaceChildren();
       const status = /paus|interrupt|budget|block|permission/i.test(u.phase || "") ? String(u.phase).replace(/[_-]+/g, " ") : "running";
-      workflowText(el, "workflow-marker", `${name} · ${status}`);
+      const marker = workflowText(el, "workflow-marker", "");
+      // Every other line in the transcript that reports work carries an icon;
+      // a bare string beside them reads as something half-drawn.
+      marker.innerHTML = TOOL_ICON.workflow + `<span>${escapeHtml(`${name} · ${status}`)}</span>`;
       return;
     }
     let report = el.querySelector(".workflow-report");
@@ -14010,8 +14020,16 @@
   }
 
   function syncWorkflowPin() {
+    // Every live run, including one this view only learned about from a replay.
+    // A phone joining a conversation replays the transcript, so `receivedAt` is
+    // null until the NEXT frame lands -- and a deep-research run emits about a
+    // dozen frames across its whole length. Gating the pin on freshness meant
+    // the owner watched "deep-research - running" sit in the transcript with
+    // nothing above the composer, which is the complaint the pin exists to fix.
+    // How fresh the information is belongs in the receipt, not in whether the
+    // run is shown at all.
     const records = [...state.runProgressCards.values()].map((el) => el._workflow)
-      .filter((r) => r && !r.update.done && r.receivedAt != null)
+      .filter((r) => r && !r.update.done)
       .sort((a, b) => Number(workflowBlockages(b.update).length > 0) - Number(workflowBlockages(a.update).length > 0));
     if (!records.length) {
       if (workflowPin) workflowPin.remove();

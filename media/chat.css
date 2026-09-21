@@ -2797,7 +2797,10 @@ body.thinking-hidden .msg.thinking { display: none; }
 .workflow-dot[data-state="unknown"] { border-style: dashed; }
 .workflow-dot[data-state="done"], .workflow-dot[data-state="completed"] { background: var(--vscode-charts-green, #4ec9b0); border-color: var(--vscode-charts-green, #4ec9b0); opacity: 1; }
 .workflow-dot[aria-current="step"] { border: 2px solid var(--vscode-charts-blue, #3794ff); opacity: 1; }
-.workflow-marker { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A row, so the icon sits beside the name the way a tool line's does, and
+   the ellipsis lands on the text rather than clipping the icon off. */
+.workflow-marker { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.workflow-marker > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .workflow-card:not(.run-progress-done) { border: 0; padding: 4px 0; background: none; }
 .workflow-report-toggle { cursor: pointer; font-weight: 600; }
 .workflow-report-body { margin-top: 6px; }

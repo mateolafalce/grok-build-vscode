@@ -150,13 +150,29 @@ describe("workflow evidence", () => {
     expect(agent(h).textContent).toContain(state.replaceAll("_", " "));
     expect(pin(h).querySelector(".workflow-pin-toggle")!.getAttribute("aria-expanded")).toBe("false");
   });
-  it("does not claim replayed frames are live receipts or observed activity", () => {
+  // A phone joining a conversation replays the transcript, so a run that is
+  // very much alive arrives with no locally observed frame. This asserted the
+  // pin was ABSENT there, which is what the owner hit on a cloud machine: a
+  // bare "deep-research - running" line and nothing above the composer, for as
+  // long as it took the next frame to arrive -- about a dozen frames span a
+  // whole deep-research run. Freshness is the receipt's job; it is not a
+  // reason to withhold the run.
+  it("pins a replayed live run without claiming a receipt or observed activity", () => {
     const h = boot(); dispatch(h.window, { type: "historyReplay", active: true });
     send(h); send(h, { agents: [{ ...base.agents[0], tokens_used: 30 }] });
     dispatch(h.window, { type: "historyReplay", active: false });
-    expect(h.doc.querySelector(".workflow-pin")).toBeNull();
-    expect(card(h).textContent).toBe("deep-research \u00b7 running");
+    expect(h.doc.querySelector(".workflow-pin")).not.toBeNull();
+    // No age, because none is known -- and not a finished run's wording either.
+    expect(receipt(h)).toBe("no update since this view opened");
+    expect(activity(h)).toBe("no token activity observed");
+    // The handle is what a control needs; the host owns the run either way.
+    const buttons = [...pin(h).querySelectorAll<HTMLButtonElement>(".run-progress-btn")];
+    expect(buttons.map(b => b.textContent)).toEqual(["Pause", "Stop"]);
+    expect(buttons.every(b => b.disabled)).toBe(false);
+    expect(card(h).textContent).toBe("deep-research · running");
     expect(card(h).querySelector("summary")).toBeNull();
+    // Beside tool rows that all carry one, a bare string read as half-drawn.
+    expect(card(h).querySelector(".workflow-marker svg.tool-icon")).not.toBeNull();
   });
 });
 
