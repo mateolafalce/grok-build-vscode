@@ -15,9 +15,18 @@ describe("provider logo assets", () => {
     expect(source).toContain("M9.27 15.29l7.978-5.897");
     expect(source).toContain("M9.205 8.658v-2.26");
     expect(source).toContain("M4.709 15.955l4.72-2.647.08-.23-.08-.128");
+    expect(source).toContain("M6.897 4c1.915 0 3.516.932 5.43 3.376");
     const providerSvgs = source.match(/<svg class="provider-logo"[^>]*>/g) ?? [];
     expect(providerSvgs.length).toBeGreaterThan(0);
     expect(providerSvgs.every((svg) => !svg.includes("style="))).toBe(true);
+    // Meta's two loops are drawn with holes, so nonzero fills them solid and
+    // the mark becomes a blob. Lobe ships all four marks with evenodd and the
+    // other three render the same under it, which is why it sits on the shared
+    // template rather than on one provider's path.
+    expect(providerSvgs.every((svg) => svg.includes('fill-rule="evenodd"'))).toBe(true);
+    // No provider draws its own initial. A letter beside three real marks is a
+    // placeholder, and Muse Code carried one until 4.11.0.
+    expect(source).not.toMatch(/>[A-Z]<\/span>/);
   });
 
   it.each(["media/chat.css", "media/projects-rail.css"])("maps every badge state and draws the one-pixel row-color ring in %s", (file) => {
