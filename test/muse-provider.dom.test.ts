@@ -3,7 +3,7 @@ import { bootWebview, click, dispatch } from "./webview-harness";
 import { INTERNAL_PROVIDERS, supportsCompaction } from "../src/acp-backend";
 
 const description = "Your content, including inter-session messages, may be used for product improvement.";
-const reason = "Muse Code is unavailable on this host: Meta does not provide a native Windows CLI";
+const reason = "This provider is disabled by the host administrator";
 
 it("retains every advertised provider's identity in the model picker", () => {
   const h = bootWebview();
@@ -85,7 +85,7 @@ describe("Muse host advertisement", () => {
     expect(h.doc.querySelectorAll(".model-picker-row")).toHaveLength(2);
   });
 
-  it("does not offer models when the execution host reports Windows", () => {
+  it("does not offer models when the execution host reports the provider unavailable", () => {
     const h = bootWebview();
     dispatch(h.window, { type: "providerState", providers: [{ id: "muse", connected: false, unavailableReason: reason }] });
     catalog(h);

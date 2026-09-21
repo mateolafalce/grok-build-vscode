@@ -73,9 +73,9 @@ describe("a phone with nothing connected", () => {
     expect(h.posted).toEqual([]);
   });
 
-  it("does not offer Muse sign-in when the execution host reports Windows", () => {
+  it("does not offer Muse sign-in when the execution host reports the provider unavailable", () => {
     const h = boot({ remote: true });
-    const unavailableReason = "Meta does not provide a native Windows CLI";
+    const unavailableReason = "This provider is disabled by the host administrator";
     dispatch(h.window, { type: "providerState", providers: [{ id: "muse", connected: false, unavailableReason }] });
     onboarding(h, { state: "muse-login", provider: "muse", platform: "win32" });
     expect(text(h)).toContain(unavailableReason);

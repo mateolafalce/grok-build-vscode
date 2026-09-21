@@ -8,7 +8,7 @@
 
 - **Muse Code is a fourth provider.** Meta's coding agent now appears alongside Grok, Codex and Claude Code: sign in through Muse's own CLI, hold a conversation with streaming replies and tool approvals, resume from history, and pick a model. It does not speak the protocol the other three share, so the extension ships a small adapter that translates — the same arrangement Codex and Claude Code already run under, with the difference that this one is ours rather than a third party's.
 
-  **On Windows the row appears and explains that it cannot run**, because Meta ships no native Windows binary. The platform that decides is the one the agent runs on, not the one you are looking at — so a Windows browser driving a Mac offers Muse normally.
+  **The platform that decides is the one the agent runs on**, not the one you are looking at — so a Windows browser driving a Mac offers Muse normally.
 
   **Sign in from wherever you are.** `muse login` turns out to be an ordinary device-code flow, so Muse connects the same way the other three do: the machine running the agent starts the login, and Meta's link and short code arrive on whichever screen asked for them — a phone, a browser, or the editor at your desk.
 

@@ -18,8 +18,18 @@ describe("Muse backend boundary", () => {
     expect(isAcpProvider("muse")).toBe(false);
   });
 
-  it("refuses native Windows even with an explicit executable", () => {
-    expect(locateMuseCli({ platform: "win32", configuredPath: "muse.exe", isExecutable: () => true })).toBeUndefined();
+  it("honours an explicit Windows executable", () => {
+    expect(locateMuseCli({ platform: "win32", configuredPath: "muse.exe", isExecutable: () => true })).toBe(path.resolve("muse.exe"));
+    expect(locateMuseCli({ platform: "win32", env: { MUSE_CODE_EXECUTABLE: "muse.exe" }, isExecutable: () => true })).toBe(path.resolve("muse.exe"));
+    expect(locateMuseCli({ platform: "win32", configuredPath: "missing.exe", isExecutable: () => false })).toBeUndefined();
+  });
+
+  it("does not probe the POSIX home-bin fallback on Windows", () => {
+    const checked: string[] = [];
+    expect(locateMuseCli({ platform: "win32", env: {}, home: "C:\\Users\\test", which: () => undefined,
+      isExecutable: file => { checked.push(file); return true; },
+    })).toBeUndefined();
+    expect(checked).toEqual([]);
   });
 
   it("checks executability, honours an explicit missing path, and finds the user bin fallback", () => {

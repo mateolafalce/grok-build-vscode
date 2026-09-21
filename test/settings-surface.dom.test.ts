@@ -2215,7 +2215,7 @@ describe("Muse settings parity", () => {
   });
 
   it.each(surfaces)("uses execution-host availability on $name", ({ env }) => {
-    const reason = "Muse Code is unavailable on this host: Meta does not provide a native Windows CLI";
+    const reason = "This provider is disabled by the host administrator";
     const h = mountAt("providers", { env,
       snapshot: { providers: [{ id: "muse", connected: false, unavailableReason: reason }] } });
     const row = h.root.querySelector(museRow)!;

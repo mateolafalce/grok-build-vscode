@@ -282,8 +282,7 @@ describe("multi-provider review regressions", () => {
     expect(instance.providerStateMessage()).toEqual({
       type: "providerState",
       providers: [
-        { id: "muse", connected: false,
-          ...(process.platform === "win32" ? { unavailableReason: "Muse Code is unavailable on this host: Meta does not provide a native Windows CLI" } : {}) },
+        { id: "muse", connected: false },
         { id: "grok", connected: true },
         { id: "codex", connected: false },
         { id: "claude", connected: false },

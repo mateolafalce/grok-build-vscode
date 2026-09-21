@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import * as path from "node:path";
 import { findCliOnPath, isCliFile } from "./cli-path";
 
-/** Locate only an existing vendor binary; native Windows is unsupported. */
+/** Locate an installed Muse CLI, with the launcher's home-bin fallback on POSIX. */
 export function locateMuseCli(options: {
   configuredPath?: string;
   env?: NodeJS.ProcessEnv;
@@ -12,7 +12,6 @@ export function locateMuseCli(options: {
   which?: (name: string) => string | undefined;
 } = {}): string | undefined {
   const platform = options.platform ?? process.platform;
-  if (platform !== "darwin" && platform !== "linux") return undefined;
   const env = options.env ?? process.env;
   const executable = options.isExecutable ?? ((file) => isCliFile(file, platform));
   const configured = options.configuredPath?.trim() || env.MUSE_CODE_EXECUTABLE?.trim();
@@ -21,11 +20,10 @@ export function locateMuseCli(options: {
     ? options.which("muse")
     : findCliOnPath("muse", env, platform, executable);
   if (found && executable(found)) return found;
+  if (platform === "win32") return undefined;
   const candidate = path.join(options.home || env.HOME || homedir(), ".local", "bin", "muse");
   return executable(candidate) ? candidate : undefined;
 }
-
-export const MUSE_WINDOWS_REASON = "Muse Code is unavailable on this host: Meta does not provide a native Windows CLI";
 
 /**
  * The version out of `muse --version`.

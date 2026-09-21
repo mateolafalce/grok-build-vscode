@@ -1,5 +1,5 @@
 import { MuseBackend } from "./muse-backend";
-import { locateMuseCli, MUSE_WINDOWS_REASON, parseMuseVersionOutput } from "./muse-cli-locator";
+import { locateMuseCli, parseMuseVersionOutput } from "./muse-cli-locator";
 import type {
   Host,
   HostCancellationToken,
@@ -2414,8 +2414,7 @@ export class GrokSidebar {
       providers: [
         { id: "muse", connected: museConnected,
           ...(museConnected && versions.muse ? { cliVersion: versions.muse } : {}),
-          ...(needsLogin.muse ? { needsLogin: true } : {}),
-          ...(process.platform === "win32" ? { unavailableReason: MUSE_WINDOWS_REASON } : {}) },
+          ...(needsLogin.muse ? { needsLogin: true } : {}) },
         {
           id: "grok",
           connected: grokConnected,
