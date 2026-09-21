@@ -13473,8 +13473,19 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
    * What it costs, and the reason for the exit handler: a shared process is a
    * shared failure domain. When it dies the handle is dropped, so the next
    * listing starts a fresh one rather than talking to a corpse.
+   *
+   * It is spawned in the HOME directory, never in a project, and that is not
+   * cosmetic. Because the spawn cwd carries no meaning (above), a process born
+   * in whichever project happened to list first would go on holding that
+   * folder open for as long as it lived — and it now outlives the project. On
+   * Windows the user closes the project, tries to delete the folder, and
+   * Explorer refuses; `revokeClosedProjectFolder` hard-kills conversation
+   * processes for exactly that reason, and this one is not one of them. Home
+   * is measured, not assumed: asked from there, codex returned its global
+   * catalog across nine checkouts and claude returned the 69 sessions of a
+   * repo the process had never been in.
    */
-  private async adapterHistoryClient(provider: AcpProvider, cliPath: string, cwd: string): Promise<AcpClient | undefined> {
+  private async adapterHistoryClient(provider: AcpProvider, cliPath: string): Promise<AcpClient | undefined> {
     const existing = this.adapterHistoryClients.get(provider);
     if (existing && existing.cliPath === cliPath) return existing.client;
     // A relocated or upgraded CLI is a different program. Never keep talking to
@@ -13484,7 +13495,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     if (!backend) return undefined;
     const client = new AcpClient({
       cliPath,
-      cwd,
+      cwd: this.projectHomeDir(),
       env: { ...process.env },
       backend,
       log: (message) => this.host.appendLine(message),
@@ -13543,7 +13554,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     const cliPath = this.locateProvider(provider);
     if (!history || !cliPath || !this.connectedProviders().includes(provider)) return;
     if (this.providerCliUpdate?.provider === provider) return;
-    const client = await this.adapterHistoryClient(provider, cliPath, cwd);
+    const client = await this.adapterHistoryClient(provider, cliPath);
     if (!client) return;
     const result = await client.listSessions(cwd, process.platform);
     const overrides = this.state.get<SessionMetaOverrides>(SESSION_META_KEY, {});

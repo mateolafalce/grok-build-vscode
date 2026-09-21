@@ -244,6 +244,19 @@ describe("multi-provider review regressions", () => {
     expect(body).not.toContain("...(provider === \"codex\"");
   });
 
+  it("starts the shared history process in the home directory, never in a project", () => {
+    // The spawn cwd carries no meaning — codex sends no cwd on the wire and
+    // claude takes it per call — so a process born in whichever project
+    // listed first would hold that folder for nothing. It now OUTLIVES the
+    // project, and on Windows that is a folder the user cannot delete after
+    // closing it. Home is the one directory that is never a project.
+    const body = methodBody("private async adapterHistoryClient(");
+    expect(body).toContain("cwd: this.projectHomeDir()");
+    // The listing cwd still reaches `session/list` as an argument; only the
+    // process's own birthplace changed.
+    expect(methodBody("private async listAdapterHistory(")).toContain("client.listSessions(cwd, process.platform)");
+  });
+
   it("puts minimal provider state in every remote client snapshot", () => {
     const instance = Object.create(GrokSidebar.prototype) as any;
     instance.providerConnections = vi.fn(() => ({ grok: true, codex: true }));
