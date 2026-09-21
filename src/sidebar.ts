@@ -383,6 +383,11 @@ import {
   resolveChatOpenFilePath,
 } from "./media-serve";
 import { isExecutableOpenTarget, revalidateOpenFileForUse } from "./desktop/desktop-policy";
+// Pure (its only electron import is a type, erased at compile time), so VS
+// Code can read the platform rule without pulling Electron in. Shared
+// rather than restated: a second copy of "which platforms have a tray" is
+// how a row appears on macOS six months from now.
+import { trayIsSupported } from "./desktop/tray";
 import {
   describeFfmpegProblem,
   ffmpegInstallHint,
@@ -1004,6 +1009,7 @@ export class GrokSidebar {
     "configureOpenAiVoice",
     "setTelemetryEnabled",
     "setThumbsFeedback",
+    "setDesktopTray",
     "openGlobalConfig",
     "openProviderConfig",
     "openProjectConfig",
@@ -2408,6 +2414,23 @@ export class GrokSidebar {
    * truth, and it runs both from the page's Refresh button and when the page
    * is opened.
    *
+   * THE TWO HALVES ARE NOT THE SAME COST, and conflating them was #171.
+   *
+   * Locating a CLI and reading its `--version` is local: a spawn, no network,
+   * nobody contacted. Proving an ACCOUNT is not — it starts the agent's ACP
+   * adapter, which starts the vendor's own binary and creates a session against
+   * the vendor's API. Measured on one page open, per provider: 14 connections
+   * to api.anthropic.com, 5 to mcp-proxy.anthropic.com, one to a telemetry
+   * endpoint, about three seconds, and the person's MCP connectors started
+   * along with it. No prompt is ever sent, so nothing is billed — but it
+   * happened for an account the reporter had never connected to this
+   * extension, because they opened a settings page.
+   *
+   * So `credentials` splits them. The page's own arrival asks for the local
+   * half; the Refresh button and a row's Check ask for both, because a person
+   * pressed something. `credentials` absent means both, so an older client's
+   * Refresh keeps working — see the message's doc comment in protocol.ts.
+   *
    * Every INSTALLED agent is probed, not just the ones already marked connected.
    * Signing in happens outside this extension — a browser OAuth approval, a
    * `grok login` in any terminal — and the desk has no way to hear about it.
@@ -2426,7 +2449,8 @@ export class GrokSidebar {
    * sign-in action (see setProviderNeedsLogin), and one that was never
    * connected simply stays that way.
    */
-  private async refreshProviderStates(): Promise<void> {
+  private async refreshProviderStates(opts: { credentials?: boolean } = {}): Promise<void> {
+    const probeCredentials = opts.credentials !== false;
     if (this.providerRefreshInFlight) return;
     this.providerRefreshInFlight = true;
     // Say it started before the slow part. The button reads `checking` off this
@@ -2455,7 +2479,13 @@ export class GrokSidebar {
       // on a cloud machine there is no window to reload to clear it, which
       // made Refresh the only door and it was shut.
       await Promise.all(installed.map(async (provider) => {
-        const authenticated = await this.reprobeProviderCredentials(provider).catch(() => false);
+        // Local-only pass: the locators have already re-run above, the version
+        // is re-read below, and nothing here contacts a vendor. A row keeps
+        // whatever the last real probe established — which is honest, since
+        // nothing has been learned to change it.
+        const authenticated = probeCredentials
+          ? await this.reprobeProviderCredentials(provider).catch(() => false)
+          : false;
         // Codex and Claude only. Their version is what decides
         // `updateAvailable`; Grok has its own update check, and re-probing it
         // would re-run the locator this method deliberately leaves alone when
@@ -11735,6 +11765,12 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         await this.host.getConfiguration("grok")
           .update("thumbsFeedback", !!msg.value, "global");
         break;
+      case "setDesktopTray":
+        // The desktop main process watches this key and builds or tears down
+        // the tray itself; nothing here needs to know a Tray exists.
+        await this.host.getConfiguration("grok")
+          .update("desktop.tray", !!msg.value, "global");
+        break;
       case "runInstallCmd": {
         // Host-owned confirmation, because this is one of the two messages that
         // run something. The renderer does not supply the command — it is the
@@ -11951,7 +11987,9 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         );
         break;
       case "refreshProviders":
-        await this.refreshProviderStates();
+        // Absent means true — see the message's own doc comment. An older
+        // client's Refresh button sends nothing and must keep working.
+        await this.refreshProviderStates({ credentials: msg.credentials !== false });
         break;
       case "checkGrokUpdate":
         await this.checkGrokUpdate();
@@ -16949,6 +16987,10 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       processingSound: cfg.get("processingSound", false),
       readRepliesAloud: cfg.get("readRepliesAloud", false),
       telemetryEnabled: cfg.get("telemetry.enabled", true),
+      // Desktop-only and platform-gated; the row hides itself on everything
+      // else rather than offering a switch with nothing behind it (#174).
+      traySupported: this.host.canSwitchWorkspaceFolder && trayIsSupported(process.platform),
+      desktopTray: cfg.get("desktop.tray", true),
       thumbsFeedback: cfg.get("thumbsFeedback", false),
       appPurpose: this.appPurpose() || DEFAULT_APP_PURPOSE,
       ...(commandLanguage ? { commandLanguage } : {}),
@@ -21010,6 +21052,10 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           this.voiceSetting(this.sessionCwd(this.focused), "voiceKeyterms", []),
         ),
         telemetryEnabled: cfg.get("telemetry.enabled", true),
+      // Desktop-only and platform-gated; the row hides itself on everything
+      // else rather than offering a switch with nothing behind it (#174).
+      traySupported: this.host.canSwitchWorkspaceFolder && trayIsSupported(process.platform),
+      desktopTray: cfg.get("desktop.tray", true),
         thumbsFeedback: cfg.get("thumbsFeedback", false),
         providers: this.providerStateMessage().providers,
         providersChecking: this.providerRefreshInFlight,
