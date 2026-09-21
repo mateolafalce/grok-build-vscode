@@ -9871,6 +9871,7 @@
     state.mediaGenCallIds.clear();
     state.subagentCards.clear();
     state.runProgressCards.clear();
+    clearWorkflowPin();
     // Question/restored-card maps too, or a new session's tool updates could
     // attach to the previous session's (now-detached) cards by toolCallId.
     state.questionToolCalls.clear();
@@ -13669,13 +13670,282 @@
   }
 
   // ---------- Workflow / Goal / Deep-research progress cards (P2-10) ----------
-  // Host normalizes `_x.ai/session_notification` workflow_updated / goal_updated
-  // into a stable shape; we upsert one card per id and stop the dots on done.
+  // Host normalizes workflow_updated / goal_updated. Workflow clocks and
+  // activity claims below use reported data; goals retain their completion UI.
+
+  let workflowPin = null;
+  let workflowAgeTimer = null;
+  let workflowPinExpanded = false;
+
+  function clearWorkflowPin() {
+    if (workflowPin) workflowPin.remove();
+    workflowPin = null;
+    workflowPinExpanded = false;
+    clearInterval(workflowAgeTimer);
+    workflowAgeTimer = null;
+  }
+
+  function workflowText(parent, className, text, tag = "div") {
+    const el = document.createElement(tag);
+    el.className = className;
+    el.textContent = text;
+    parent.appendChild(el);
+    return el;
+  }
+
+  function workflowPhaseLabel(update) {
+    const phases = Array.isArray(update.phases) ? update.phases : [];
+    const indexed = phases.map((p, i) => ({ p, i }));
+    const reference = update.currentPhaseId || update.currentPhase;
+    const byId = reference ? indexed.filter(({ p }) => p.id === reference) : [];
+    const useId = update.currentPhaseId || byId.length;
+    const matches = useId ? byId : indexed.filter(({ p }) => update.currentPhase && p.title === update.currentPhase);
+    const name = useId && matches.length === 1 ? matches[0].p.title : update.currentPhase;
+    return name ? name + (matches.length === 1 ? `, step ${matches[0].i + 1} of ${phases.length}` : "") : "";
+  }
+
+  function workflowElapsed(ms) {
+    const seconds = Math.floor(Math.max(0, ms) / 1000);
+    return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+  }
+
+  function workflowAgentKey(agent, agents) {
+    if (agent.id) return agents.filter((a) => a.id === agent.id).length === 1 ? `id:${agent.id}` : null;
+    // A label is usable only when unique. Never carry evidence by array index.
+    return agents.filter((a) => a.label === agent.label).length === 1 ? `label:${agent.label}` : null;
+  }
+
+  function workflowAgentActivity(record, agent) {
+    const key = workflowAgentKey(agent, record.update.agents || []);
+    const event = key && record.activity.get(key);
+    if (!event) return "no activity observed";
+    const seconds = Math.max(0, Math.floor((Date.now() - event.at) / 1000));
+    return `${event.kind} ${seconds}s ago`;
+  }
+
+  function workflowBlockages(update) {
+    return (update.agents || []).filter((a) => /fail|error|permission|block|await.*approval|waiting.*approval/i.test(a.state || ""));
+  }
+
+  function workflowMotion(record) {
+    const u = record.update;
+    const agents = Array.isArray(u.agents) ? u.agents : [];
+    const blocked = workflowBlockages(u);
+    const running = agents.filter((a) => /^(running|active)$/i.test(a.state || ""));
+    const count = Array.isArray(u.agents) ? running.length : u.activeAgents;
+    const routine = count == null ? "agent activity unavailable" : `${count} reported running`;
+    const headline = blocked.length ? blocked.map((a) => `${a.label}: ${String(a.state).replace(/[_-]+/g, " ")}`).join("; ") : routine;
+    const events = agents.map((a) => ({ agent: a, event: record.activity.get(workflowAgentKey(a, agents)) }))
+      .filter(({ event }) => event).sort((a, b) => b.event.at - a.event.at);
+    const observed = events.length ? `${events[0].agent.label}: ${workflowAgentActivity(record, events[0].agent)}` : "activity unverified";
+    // An observed event is a dated fact, never an assertion that work continues.
+    const unverified = events.length && running.some((a) => !record.activity.has(workflowAgentKey(a, agents)))
+      ? " · running activity unverified" : "";
+    return `${headline} · ${observed}${unverified}`;
+  }
+
+  function refreshWorkflowAges() {
+    for (const el of state.runProgressCards.values()) {
+      const record = el._workflow;
+      if (!record) continue;
+      for (const surface of [el, record.pin].filter(Boolean)) {
+        surface.querySelector(".workflow-motion").textContent = workflowMotion(record);
+        surface.querySelector(".workflow-receipt").textContent = record.receivedAt == null
+          ? "historical workflow update"
+          : `workflow update received ${Math.max(0, Math.floor((Date.now() - record.receivedAt) / 1000))}s ago`;
+        for (const row of surface.querySelectorAll(".workflow-agent")) {
+          const agent = record.update.agents[Number(row.dataset.agentIndex)];
+          row.querySelector(".workflow-agent-activity").textContent = workflowAgentActivity(record, agent);
+        }
+      }
+    }
+  }
+
+  function renderWorkflowSurface(el, record) {
+    const u = record.update;
+    if (!el.firstChild) {
+      el.innerHTML = `<div class="run-progress-row"><span class="run-progress-title"></span><span class="run-progress-phase"></span><span class="run-progress-elapsed" hidden></span></div>` +
+        `<div class="workflow-motion"></div><div class="workflow-receipt"></div><div class="run-progress-actions"></div>` +
+        `<ol class="workflow-phases" hidden></ol><div class="workflow-expanded"><div class="run-progress-sub" hidden></div><div class="run-progress-detail" hidden></div><div class="workflow-spend" hidden></div><ul class="workflow-roster" hidden></ul></div>`;
+    }
+    el.classList.toggle("run-progress-failed", !!u.failed);
+    el.classList.toggle("run-progress-cancelled", !!u.cancelled && !u.failed);
+    el.classList.toggle("run-progress-done", !!u.done);
+    const title = el.querySelector(".run-progress-title");
+    title.textContent = u.title || u.id;
+    title.title = title.textContent;
+    const status = u.failed ? "failed" : u.cancelled ? "cancelled" : u.done && /completed|success/.test(u.phase) ? "done" : String(u.phase || "").replace(/[_-]+/g, " ");
+    const position = workflowPhaseLabel(u);
+    const lifecycle = u.done || /paus|interrupt|budget|block|permission/i.test(u.phase || "");
+    el.querySelector(".run-progress-phase").textContent = `· ${position || status}${position && lifecycle ? ` · ${status}` : ""}`;
+    const elapsed = el.querySelector(".run-progress-elapsed");
+    elapsed.hidden = !Number.isFinite(u.elapsedMs);
+    elapsed.textContent = elapsed.hidden ? "" : `· ${workflowElapsed(u.elapsedMs)}`;
+    elapsed.title = "Reported workflow elapsed time; advances only when reported";
+
+    const strip = el.querySelector(".workflow-phases");
+    strip.replaceChildren();
+    strip.hidden = !Array.isArray(u.phases) || !u.phases.length;
+    strip.setAttribute("aria-label", "Reported workflow phases");
+    for (const phase of u.phases || []) {
+      const item = workflowText(strip, "workflow-phase", phase.title, "li");
+      item.dataset.state = phase.state || "unknown";
+      if (phase.id) item.dataset.phaseId = phase.id;
+      item.title = `${phase.title}: ${phase.state || "state unavailable"}`;
+      item.setAttribute("aria-label", item.title);
+      if (phase.state === "active") item.setAttribute("aria-current", "step");
+    }
+    for (const [selector, value] of [[".run-progress-sub", u.subtitle], [".run-progress-detail", u.detail]]) {
+      const target = el.querySelector(selector);
+      target.hidden = !value;
+      target.textContent = value || "";
+    }
+    const spend = el.querySelector(".workflow-spend");
+    const spendText = Number.isFinite(u.agentsUsed)
+      ? (Number.isFinite(u.agentBudget) ? `${u.agentsUsed} of ${u.agentBudget} agents used` : `${u.agentsUsed} agents used`) : "";
+    spend.hidden = !spendText || (u.detail || "").includes(spendText);
+    spend.textContent = spendText;
+    const roster = el.querySelector(".workflow-roster");
+    roster.hidden = !Array.isArray(u.agents);
+    roster.replaceChildren();
+    (u.agents || []).forEach((agent, i) => {
+      const row = workflowText(roster, "workflow-agent", "", "li");
+      row.dataset.agentIndex = String(i);
+      row.dataset.state = agent.state || "unknown";
+      workflowText(row, "workflow-agent-name", agent.label, "strong");
+      workflowText(row, "workflow-agent-state", [agent.phase, agent.state ? `reported ${agent.state.replace(/[_-]+/g, " ")}` : "state unavailable",
+        Number.isFinite(agent.tokensUsed) ? `${agent.tokensUsed} tokens` : ""].filter(Boolean).join(" · "));
+      workflowText(row, "workflow-agent-activity", "");
+    });
+    if (Array.isArray(u.agents) && !u.agents.length) workflowText(roster, "workflow-agent-empty", "No agents reported", "li");
+
+    const actions = el.querySelector(".run-progress-actions");
+    const paused = /paus/i.test(u.phase || "");
+    const reason = record.receivedAt == null ? "Controls unavailable for historical updates"
+      : !u.displayName ? "Controls unavailable: no workflow handle reported"
+      : !/^[\w.:-]+$/.test(u.displayName) ? "Controls unavailable: invalid workflow handle" : "";
+    // Preserve focused controls and pending pointer clicks across rollup frames.
+    const controlsKey = JSON.stringify([u.done, paused, u.displayName, reason]);
+    if (actions.dataset.controlsKey !== controlsKey) {
+      actions.dataset.controlsKey = controlsKey;
+      actions.replaceChildren();
+      actions.hidden = !!u.done;
+      if (!u.done) {
+        for (const action of [paused ? "resume" : "pause", "stop"]) {
+          const button = workflowText(actions, "run-progress-btn", action[0].toUpperCase() + action.slice(1), "button");
+          button.type = "button";
+          button.disabled = !!reason;
+          button.title = reason || `${button.textContent} ${u.displayName}`;
+          button.onclick = () => {
+            if (!button.disabled) vscode.postMessage({ type: "workflowControl", action, displayName: u.displayName });
+          };
+        }
+        if (reason) workflowText(actions, "workflow-control-reason", reason);
+      }
+    }
+  }
+
+  function syncWorkflowPin() {
+    const records = [...state.runProgressCards.values()].map((el) => el._workflow)
+      .filter((r) => r && !r.update.done && r.receivedAt != null)
+      .sort((a, b) => Number(workflowBlockages(b.update).length > 0) - Number(workflowBlockages(a.update).length > 0));
+    if (!records.length) {
+      if (workflowPin) workflowPin.remove();
+      workflowPin = null;
+      return;
+    }
+    if (!workflowPin) {
+      workflowPin = document.createElement("section");
+      workflowPin.className = "workflow-pin";
+      workflowPin.setAttribute("aria-label", "Live workflows");
+      const toggle = workflowText(workflowPin, "workflow-pin-toggle", "", "button");
+      toggle.type = "button";
+      toggle.setAttribute("aria-controls", "workflow-pin-runs");
+      toggle.onclick = () => {
+        workflowPinExpanded = !workflowPinExpanded;
+        syncWorkflowPin();
+      };
+      const stack = workflowText(workflowPin, "workflow-pin-runs", "");
+      stack.id = "workflow-pin-runs";
+      // All three hosts provide this scrollport. Normal flex flow shrinks it;
+      // the pin never covers transcript text or depends on host HTML changes.
+      messagesEl.parentNode.insertBefore(workflowPin, messagesEl.nextSibling);
+    }
+    workflowPin.classList.toggle("is-expanded", workflowPinExpanded);
+    const toggle = workflowPin.querySelector(".workflow-pin-toggle");
+    toggle.textContent = `${records.length} live workflow${records.length === 1 ? "" : "s"} · ${workflowPinExpanded ? "Collapse" : "Expand"}`;
+    toggle.setAttribute("aria-expanded", String(workflowPinExpanded));
+    const stack = workflowPin.querySelector(".workflow-pin-runs");
+    for (const child of [...stack.children]) {
+      if (!records.some((r) => r.pin === child)) child.remove();
+    }
+    const focused = document.activeElement;
+    for (const [index, record] of records.entries()) {
+      if (!record.pin) {
+        record.pin = document.createElement("article");
+        record.pin.className = "workflow-pin-run run-progress-card";
+        record.pin.dataset.runId = record.update.id;
+      }
+      if (stack.children[index] !== record.pin) stack.insertBefore(record.pin, stack.children[index] || null);
+      renderWorkflowSurface(record.pin, record);
+    }
+    if (focused && focused.isConnected && stack.contains(focused) && document.activeElement !== focused) focused.focus({ preventScroll: true });
+    refreshWorkflowAges();
+  }
+
+  function applyWorkflowProgress(update) {
+    const id = String(update.id);
+    let el = state.runProgressCards.get(id);
+    // Loading older transcript pages must not rewind a live run or its pin.
+    if (state.historyHydrating && el) return;
+    if (!el) {
+      el = document.createElement("div");
+      el.className = "run-progress-card workflow-card";
+      el.dataset.runId = id;
+      state.runProgressCards.set(id, el);
+      appendTranscriptChild(el);
+    }
+    let record = el._workflow;
+    if (!record) record = el._workflow = { update, activity: new Map(), receivedAt: null, pin: null };
+    const historical = state.replaying;
+    if (!historical) record.receivedAt = Date.now();
+    const stale = Number.isFinite(update.revision) && Number.isFinite(record.update.revision) && update.revision < record.update.revision;
+    if (!stale) {
+      const before = record.update.agents || [];
+      const agents = update.agents || [];
+      const nextActivity = new Map();
+      for (const agent of agents) {
+        const key = workflowAgentKey(agent, agents);
+        if (!key) continue;
+        const previous = before.find((a) => workflowAgentKey(a, before) === key);
+        let event = record.activity.get(key);
+        if (!historical && previous) {
+          if (Number.isFinite(previous.tokensUsed) && Number.isFinite(agent.tokensUsed) && agent.tokensUsed > previous.tokensUsed) {
+            event = { kind: "tokens moved", at: Date.now() };
+          } else if (previous.state && agent.state && previous.state !== agent.state) {
+            event = { kind: "state changed", at: Date.now() };
+          }
+        }
+        if (event && !historical) nextActivity.set(key, event);
+      }
+      record.activity = nextActivity;
+      record.update = update;
+    }
+    renderWorkflowSurface(el, record);
+    syncWorkflowPin();
+    refreshWorkflowAges();
+    if (!historical && !workflowAgeTimer) workflowAgeTimer = setInterval(refreshWorkflowAges, 1000);
+    scrollToBottom();
+  }
 
   function applyRunProgress(update) {
     if (!update || !update.id) return;
     clearWelcome();
     hideGrokking();
+    if (update.kind === "workflow") {
+      applyWorkflowProgress(update);
+      return;
+    }
     const id = String(update.id);
     let el = state.runProgressCards.get(id);
     if (!el) {
@@ -13770,18 +14040,7 @@
     el.classList.toggle("run-progress-cancelled", !!update.cancelled && !update.failed);
     el.classList.toggle("run-progress-done", !!update.done);
 
-    // How long this run has been going, in the row beside the phase.
-    //
-    // A workflow reports no completion fraction at all now (see
-    // src/run-progress.ts), so without this the row holds nothing that moves
-    // while one agent works for twenty minutes — and "still going" reads
-    // exactly like "wedged", which is half of #163. It is the same counter the
-    // waiting indicator uses, and it stops itself when the node is detached.
-    //
-    // Not armed while a loaded session is replaying: the only clock available
-    // there starts now, so a restored run would claim to have begun at the
-    // moment the conversation was opened. On `done` the interval stops and the
-    // last value stays as the run's duration.
+    // Goal elapsed display retains its existing local clock.
     const row = el.querySelector(".run-progress-row");
     if (update.done) clearWaitElapsed(row);
     else if (row && !row._waitTimer && !state.replaying) armWaitElapsed(row, "run-progress-elapsed");
@@ -13804,33 +14063,6 @@
       if (phaseAnchor) phaseAnchor.insertAdjacentHTML("afterend", BLINK_DOTS);
     }
 
-    // Workflow control buttons (pause/resume/stop) while running or paused.
-    const actions = el.querySelector(".run-progress-actions");
-    if (update.kind === "workflow" && update.displayName && !update.done) {
-      actions.hidden = false;
-      actions.innerHTML = "";
-      const mk = (label, action) => {
-        const b = document.createElement("button");
-        b.type = "button";
-        b.className = "run-progress-btn";
-        b.textContent = label;
-        b.onclick = (e) => {
-          e.stopPropagation();
-          vscode.postMessage({
-            type: "workflowControl",
-            action,
-            displayName: update.displayName,
-          });
-        };
-        return b;
-      };
-      if (paused) actions.appendChild(mk("Resume", "resume"));
-      else actions.appendChild(mk("Pause", "pause"));
-      actions.appendChild(mk("Stop", "stop"));
-    } else {
-      actions.hidden = true;
-      actions.innerHTML = "";
-    }
 
     scrollToBottom();
   }

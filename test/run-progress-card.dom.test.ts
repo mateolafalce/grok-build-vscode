@@ -1,177 +1,235 @@
-// The Workflow / Goal / Deep-research progress card, driven through the REAL
-// media/chat.js in happy-dom.
-//
-// #163 ("Workflow enhancements", leriksen71LJR): *"Workflows also tend to
-// stall and not show the right progress ... Grok tells me the progress is
-// never accurate."* He was right, and the cause was arithmetic rather than
-// rendering: a workflow's percentage was `agents_used / agent_budget` — money
-// spent — printed in the same slot, in the same shape, as the Goal card's
-// `completed / total`, which is real completion. One number was a fuel gauge
-// and the other a finish line, and nothing on screen said which.
-//
-// The parse side is pinned in test/run-progress.test.ts. What only a DOM test
-// can pin is the SLOT: that a workflow row shows no bare `%` at all, that a
-// goal still does, and that a workflow carries something that moves while one
-// agent works for twenty minutes — otherwise "still going" and "wedged" look
-// identical, which is the other half of the report.
-import { describe, it, expect } from "vitest";
-import { bootWebview, dispatch } from "./webview-harness";
+﻿import { describe, it, expect, afterEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { parseRunProgressUpdate } from "../src/run-progress";
+import { bootWebview, dispatch, click, type Harness } from "./webview-harness";
 
-const card = (doc: Document, id: string) =>
-  doc.querySelector(`.run-progress-card[data-run-id="${id}"]`) as HTMLElement | null;
-const phase = (doc: Document, id: string) =>
-  card(doc, id)?.querySelector(".run-progress-phase")?.textContent ?? "";
-const detail = (doc: Document, id: string) =>
-  card(doc, id)?.querySelector(".run-progress-detail")?.textContent ?? "";
-const elapsed = (doc: Document, id: string) =>
-  card(doc, id)?.querySelector(".run-progress-elapsed") as HTMLElement | null;
-
-/** What src/run-progress.ts hands the webview for a live workflow. */
-function workflowUpdate(over: Record<string, unknown> = {}) {
-  return {
-    kind: "workflow",
-    id: "run-abc",
-    title: "deep-research-2",
-    phase: "strategy",
-    detail: "agent_started: researcher · 1/50 agents",
-    agentsUsed: 1,
-    agentBudget: 50,
-    done: false,
-    failed: false,
-    cancelled: false,
-    displayName: "deep-research-2",
-    sessionUpdate: "workflow_updated",
-    ...over,
-  };
+const windows: Harness["window"][] = [];
+afterEach(() => { for (const window of windows.splice(0)) window.happyDOM.abort(); });
+function boot(options = {}) {
+  let now = 100_000;
+  const h = bootWebview({ ...options, beforeScripts: (window: Harness["window"]) => {
+    (window as any).Date = class extends window.Date { static now() { return now; } };
+  } });
+  windows.push(h.window);
+  return { ...h, advance: (ms: number) => { now += ms; } };
 }
+const base = {
+  sessionUpdate: "workflow_updated", run_id: "r1", name: "deep-research", status: "active",
+  current_phase: "Research", elapsed_ms: 728_000, agents_used: 4, agent_budget: 128,
+  phases: [{ title: "Plan", state: "done" }, { title: "Research", state: "active" }, { title: "Verify", state: "pending" }, { title: "Report", state: "pending" }],
+  agents: [{ agent_id: "a", label: "Researcher A", phase: "Research", state: "running", tokens_used: 0 }],
+};
+function send(h: Harness, over: Record<string, unknown> = {}) {
+  dispatch(h.window, { type: "runProgress", update: parseRunProgressUpdate({ ...base, ...over }) });
+}
+const card = (h: Harness) => h.doc.querySelector(".workflow-card")!;
+const pin = (h: Harness) => h.doc.querySelector(".workflow-pin")!;
+const summary = (h: Harness) => pin(h).querySelector(".run-progress-row")!.textContent;
+const motion = (h: Harness) => pin(h).querySelector(".workflow-motion")!.textContent;
+const agent = (h: Harness) => card(h).querySelector(".workflow-agent")!.textContent;
 
-describe("a workflow row never prints a bare percentage", () => {
-  it("shows the phase alone, and the agent spend as a labelled count", () => {
-    const { window, doc } = bootWebview();
-    dispatch(window, { type: "runProgress", update: workflowUpdate() });
-    // "strategy 2%" was the reported screen. 1 of 50 agents is 2% of the
-    // BUDGET, and it was being read as 2% of the work.
-    expect(phase(doc, "run-abc")).toBe("· strategy");
-    expect(phase(doc, "run-abc")).not.toMatch(/%/);
-    expect(detail(doc, "run-abc")).toMatch(/1\/50 agents/);
+describe("workflow wire evidence on the card and pin", () => {
+  it("carries name, phase ordinal, reported elapsed and motion without expanding", () => {
+    const h = boot(); send(h);
+    expect(summary(h)).toContain("deep-research");
+    expect(summary(h)).toContain("Research, step 2 of 4");
+    expect(summary(h)).toContain("12:08");
+    expect(motion(h)).toBe("1 reported running · activity unverified");
+    expect(pin(h).querySelector(".workflow-receipt")!.textContent).toBe("workflow update received 0s ago");
+    expect(agent(h)).toContain("reported running");
+    expect(agent(h)).toContain("no activity observed");
+    expect(agent(h)).toContain("0 tokens");
+    expect(card(h).textContent).toContain("4 of 128 agents used");
+    expect(card(h).textContent).not.toContain("%");
+    expect(card(h).querySelector(".blink-dots")).toBeNull();
   });
-
-  it("still prints one for a goal, where the fraction is real completion", () => {
-    const { window, doc } = bootWebview();
-    dispatch(window, {
-      type: "runProgress",
-      update: {
-        kind: "goal",
-        id: "goal",
-        title: "Goal",
-        phase: "running",
-        detail: "1/4 deliverables",
-        progress: 0.25,
-        done: false,
-        failed: false,
-        cancelled: false,
-        sessionUpdate: "goal_updated",
-      },
-    });
-    expect(phase(doc, "goal")).toBe("· running 25%");
+  it("ages token events independently of receipts and duplicate revisions", () => {
+    const h = boot(); send(h, { revision: 1 });
+    const moved = { revision: 2, agents: [{ ...base.agents[0], tokens_used: 12 }] };
+    h.advance(1000); send(h, moved);
+    expect(motion(h)).toContain("Researcher A: tokens moved 0s ago");
+    h.advance(12000); send(h, moved);
+    expect(motion(h)).toContain("tokens moved 12s ago");
+    expect(agent(h)).toContain("tokens moved 12s ago");
+    expect(pin(h).querySelector(".workflow-receipt")!.textContent).toContain("received 0s ago");
+    expect(summary(h)).toContain("12:08");
   });
-});
-
-describe("a live run carries an elapsed clock", () => {
-  it("arms one on the row, so a run with no moving number still moves", () => {
-    const { window, doc } = bootWebview();
-    dispatch(window, { type: "runProgress", update: workflowUpdate() });
-    const out = elapsed(doc, "run-abc");
-    expect(out).not.toBeNull();
-    expect(out!.textContent).toMatch(/^· \d+s$/);
+  it("ages receipt labels while the reported elapsed time and activity stay unchanged", async () => {
+    const h = boot(); send(h);
+    h.advance(4000);
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    expect(pin(h).querySelector(".workflow-receipt")!.textContent).toBe("workflow update received 4s ago");
+    expect(summary(h)).toContain("12:08");
+    expect(motion(h)).toBe("1 reported running · activity unverified");
   });
-
-  it("keeps counting across updates instead of restarting at zero", () => {
-    const { window, doc } = bootWebview();
-    dispatch(window, { type: "runProgress", update: workflowUpdate() });
-    const row = card(doc, "run-abc")!.querySelector(".run-progress-row") as any;
-    const started = row._waitStart;
-    // A resumed run has not been running for zero seconds, and neither has a
-    // run that simply reported a new phase.
-    dispatch(window, { type: "runProgress", update: workflowUpdate({ phase: "executing" }) });
-    expect((card(doc, "run-abc")!.querySelector(".run-progress-row") as any)._waitStart).toBe(started);
-    expect(phase(doc, "run-abc")).toBe("· executing");
+  it("keeps elapsed anchored across pause and resume until a new value arrives", () => {
+    const h = boot(); send(h, { status: "user_paused" });
+    h.advance(60000); send(h, { status: "user_paused" });
+    expect(summary(h)).toContain("12:08");
+    send(h, { status: "active" });
+    expect(summary(h)).toContain("12:08");
+    expect(pin(h).querySelector(".run-progress-btn")!.textContent).toBe("Pause");
+    send(h, { elapsed_ms: 729000 });
+    expect(summary(h)).toContain("12:09");
   });
-
-  it("stops the interval when the run finishes, leaving the duration on screen", () => {
-    const { window, doc } = bootWebview();
-    dispatch(window, { type: "runProgress", update: workflowUpdate() });
-    dispatch(window, {
-      type: "runProgress",
-      update: workflowUpdate({ phase: "completed", done: true, detail: "All checks green" }),
-    });
-    const row = card(doc, "run-abc")!.querySelector(".run-progress-row") as any;
-    expect(row._waitTimer).toBeNull();
-    expect(elapsed(doc, "run-abc")!.textContent).toMatch(/^· \d/);
-    expect(phase(doc, "run-abc")).toBe("· done");
+  it("does not mistake arrival, phase change or a token reset for work", () => {
+    const h = boot(); send(h);
+    send(h, { current_phase: "Verify", agents: [{ ...base.agents[0], phase: "Verify" }] });
+    expect(motion(h)).toContain("activity unverified");
+    send(h, { agents: [{ ...base.agents[0], tokens_used: -1 }] });
+    expect(motion(h)).toContain("activity unverified");
   });
-});
-
-describe("the phase slot shows a word, not a wire identifier", () => {
-  // The other half of "is this the only one?" — the event name is handled in
-  // src/run-progress.ts, but the phase reaches the row raw, and it is
-  // snake_case in exactly the cases that matter most: a run that ran out of
-  // budget, or one whose phase field never arrived so the parser fell back to
-  // the `workflow_*` discriminator.
-  it("spaces out a snake_case terminal phase", () => {
-    const { window, doc } = bootWebview();
-    dispatch(window, {
-      type: "runProgress",
-      update: workflowUpdate({ phase: "budget_exceeded", done: true, failed: true }),
-    });
-    expect(phase(doc, "run-abc")).toBe("· failed");
-
-    dispatch(window, {
-      type: "runProgress",
-      update: workflowUpdate({ id: "run-limited", phase: "budget_limited", done: true }),
-    });
-    expect(phase(doc, "run-limited")).toBe("· budget limited");
+  it("does not assign evidence across ambiguous labels or changed identities", () => {
+    const h = boot();
+    const anonymous = { label: "Researcher", state: "running", tokens_used: 0 };
+    send(h, { agents: [anonymous, anonymous] });
+    send(h, { agents: [{ ...anonymous, tokens_used: 15 }, anonymous] });
+    expect(motion(h)).toContain("activity unverified");
+    send(h, { agents: [{ agent_id: "new", ...anonymous, tokens_used: 20 }] });
+    expect(motion(h)).toContain("activity unverified");
   });
-
-  it("does not disturb the pause control, which reads the machine value", () => {
-    // `/paus/` is tested against update.phase, not against what is on screen,
-    // so humanising the label must not flip Pause to Resume or back.
-    const { window, doc } = bootWebview();
-    dispatch(window, { type: "runProgress", update: workflowUpdate({ phase: "paused_for_review" }) });
-    expect(phase(doc, "run-abc")).toBe("· paused for review");
-    const labels = [...card(doc, "run-abc")!.querySelectorAll(".run-progress-btn")]
-      .map((b) => b.textContent);
-    expect(labels).toEqual(["Resume", "Stop"]);
+  it.each(["failed", "permission_blocked", "waiting_for_permission", "awaiting_approval"])("surfaces %s before routine counts", (state) => {
+    const h = boot(); send(h);
+    send(h, { agents: [base.agents[0], { agent_id: "b", label: "Verifier", phase: "Verify", state, tokens_used: 0 }] });
+    expect(motion(h)).toMatch(/^Verifier:/);
+    expect(motion(h)).toContain(state.replaceAll("_", " "));
+    expect(card(h).querySelector('[data-state="' + state + '"]')).not.toBeNull();
+    expect(pin(h).classList.contains("is-expanded")).toBe(false);
+  });
+  it("does not roll back on older revisions or observe a false state change", () => {
+    const h = boot(); send(h, { revision: 3 });
+    send(h, { revision: 2, current_phase: "Plan", agents: [{ ...base.agents[0], state: "failed" }] });
+    expect(summary(h)).toContain("Research");
+    expect(motion(h)).toBe("1 reported running · activity unverified");
   });
 });
 
-describe("the liveness dots cannot be mistaken for a truncated run name", () => {
-  // The owner's first look at a card built from REAL captured frames:
-  // "those dots in the middle" — they sat immediately after the title, and
-  // `.run-progress-title` is `text-overflow: ellipsis`, so a long name really
-  // does end in "…". Two different meanings drawn identically, one pixel
-  // apart. They belong after the phase, pulsing on what is in progress.
-  const order = (doc: Document) =>
-    [...(card(doc, "run-abc")!.querySelector(".run-progress-row") as HTMLElement).children]
-      .map((c) => c.className.split(" ")[0]);
-
-  it("puts them after the phase, never between the title and it", () => {
-    const { window, doc } = bootWebview();
-    dispatch(window, { type: "runProgress", update: workflowUpdate() });
-    const seq = order(doc);
-    expect(seq.indexOf("blink-dots")).toBeGreaterThan(seq.indexOf("run-progress-phase"));
-    expect(seq.indexOf("run-progress-phase")).toBe(seq.indexOf("run-progress-title") + 1);
+describe("phase order is a reported snapshot", () => {
+  it("changes the denominator and ordinal when the latest list grows and reorders", () => {
+    const h = boot(); send(h);
+    const phases = [{ title: "Intake", state: "done" }, ...base.phases];
+    send(h, { phases });
+    expect(summary(h)).toContain("Research, step 3 of 5");
+    expect([...card(h).querySelectorAll(".workflow-phase")].map((p) => p.textContent)).toEqual(phases.map((p) => p.title));
   });
+  it("uses ids through renames, never guesses a continuation by position", () => {
+    const h = boot();
+    send(h, { current_phase_id: "research", phases: base.phases.map((p, i) => ({ ...p, id: i === 1 ? "research" : String(i), title: i === 1 ? "Renamed phase" : p.title })) });
+    expect(summary(h)).toContain("step 2 of 4");
+    send(h, { phases: base.phases.map((p, i) => ({ ...p, title: i === 1 ? "Renamed phase" : p.title })) });
+    expect(summary(h)).toContain("Research");
+    expect(summary(h)).not.toContain("step");
+  });
+  it("does not invent ordinals for duplicate names or unmatched ids", () => {
+    const h = boot(); send(h, { phases: [base.phases[1], base.phases[1]] });
+    expect(summary(h)).not.toContain("step");
+    send(h, { current_phase_id: "unknown" });
+    expect(summary(h)).not.toContain("step");
+  });
+  it("accepts current_phase as an id and rejects duplicate phase ids", () => {
+    const h = boot();
+    send(h, { current_phase: "p2", phases: [{ id: "p1", title: "Plan", state: "done" }, { id: "p2", title: "Research", state: "active" }] });
+    expect(summary(h)).toContain("Research, step 2 of 2");
+    send(h, { current_phase_id: "p2", phases: [{ id: "p2", title: "Research" }, { id: "p2", title: "Research" }] });
+    expect(summary(h)).not.toContain("step");
+  });
+  it("keeps long and many phase names complete and ordered", () => {
+    const h = boot();
+    const phases = Array.from({ length: 12 }, (_, i) => ({ title: `Extended research phase ${i} with a long title`, state: i === 7 ? "active" : "pending" }));
+    send(h, { phases, current_phase: phases[7].title });
+    expect(summary(h)).toContain("step 8 of 12");
+    expect([...pin(h).querySelectorAll(".workflow-phase")].map((p) => p.textContent)).toEqual(phases.map((p) => p.title));
+  });
+});
 
-  it("restores them to the same place when a finished run resumes", () => {
-    // The resume path re-inserts the dots with its own anchor, so it is the
-    // one place this can silently diverge from the template.
-    const { window, doc } = bootWebview();
-    dispatch(window, { type: "runProgress", update: workflowUpdate() });
-    dispatch(window, { type: "runProgress", update: workflowUpdate({ phase: "completed", done: true }) });
-    expect(order(doc)).not.toContain("blink-dots");
-    dispatch(window, { type: "runProgress", update: workflowUpdate({ phase: "executing" }) });
-    const seq = order(doc);
-    expect(seq.indexOf("blink-dots")).toBeGreaterThan(seq.indexOf("run-progress-phase"));
+describe("one shared pin with honest controls", () => {
+  it.each([{}, { vscode: true }, { remote: true }])("is a transcript sibling on host %j", (options) => {
+    const h = boot(options); send(h); send(h, { run_id: "r2", name: "deep-research-2" });
+    expect(h.doc.querySelectorAll(".workflow-pin")).toHaveLength(1);
+    expect(pin(h).previousElementSibling).toBe(h.doc.getElementById("messages"));
+    expect(pin(h).parentElement).toBe(h.doc.getElementById("messages")!.parentElement);
+    expect(pin(h).querySelectorAll(".workflow-pin-run")).toHaveLength(2);
+    expect(pin(h).textContent).toContain("2 live workflows");
+    expect(pin(h).textContent).toContain("deep-research-2");
+    const toggle = pin(h).querySelector(".workflow-pin-toggle")!;
+    click(h.window, toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(pin(h).classList.contains("is-expanded")).toBe(true);
+  });
+  it("passes each handle unchanged and switches Pause to Resume from reported state", () => {
+    const h = boot(); send(h); send(h, { run_id: "r2", name: "deep-research-2", status: "user_paused" });
+    const controls = pin(h).querySelector('[data-run-id="r2"]')!.querySelectorAll<HTMLButtonElement>(".run-progress-btn");
+    expect(controls[0].textContent).toBe("Resume");
+    controls[0].click(); controls[1].click();
+    expect(h.posted.filter((m) => m.type === "workflowControl")).toEqual([
+      { type: "workflowControl", action: "resume", displayName: "deep-research-2" },
+      { type: "workflowControl", action: "stop", displayName: "deep-research-2" },
+    ]);
+    send(h, { status: "cancelled" });
+    expect(pin(h).querySelectorAll(".workflow-pin-run")).toHaveLength(1);
+    send(h, { run_id: "r2", name: "deep-research-2", status: "completed" });
+    expect(h.doc.querySelector(".workflow-pin")).toBeNull();
+  });
+  it.each([undefined, "bad handle", " deep-research "])("makes handle %s visibly uncontrollable", (name) => {
+    const h = boot(); send(h, { name });
+    for (const surface of [card(h), pin(h)]) {
+      const buttons = [...surface.querySelectorAll<HTMLButtonElement>(".run-progress-btn")];
+      expect(buttons).toHaveLength(2);
+      expect(buttons.every((b) => b.disabled)).toBe(true);
+      expect(surface.textContent).toContain("Controls unavailable:");
+      buttons.forEach((b) => b.click());
+    }
+    expect(h.posted.filter((m) => m.type === "workflowControl")).toEqual([]);
+  });
+  it("preserves focused control elements through duplicate frames", () => {
+    const h = boot(); send(h);
+    const button = pin(h).querySelector<HTMLButtonElement>(".run-progress-btn")!;
+    button.focus(); send(h);
+    expect(pin(h).querySelector(".run-progress-btn")).toBe(button);
+    expect(h.doc.activeElement).toBe(button);
+  });
+  it("puts an actionable run before routine runs in the capped stack", () => {
+    const h = boot(); send(h);
+    send(h, { run_id: "r2", name: "Verifier run", agents: [{ ...base.agents[0], label: "Verifier", state: "permission_blocked" }] });
+    expect(pin(h).querySelector(".workflow-pin-run")!.getAttribute("data-run-id")).toBe("r2");
+    expect(motion(h)).toMatch(/^Verifier: permission blocked/);
+  });
+  it("gates fields on arrival and suppresses an old host's spend percentage", () => {
+    const h = boot();
+    dispatch(h.window, { type: "runProgress", update: { kind: "workflow", id: "old", title: "Old host", phase: "running", done: false, progress: 0.3 } });
+    expect(card(h).querySelector<HTMLElement>(".workflow-phases")!.hidden).toBe(true);
+    expect(card(h).querySelector<HTMLElement>(".workflow-roster")!.hidden).toBe(true);
+    expect(card(h).querySelector<HTMLElement>(".run-progress-elapsed")!.hidden).toBe(true);
+    expect(card(h).textContent).not.toContain("%");
+    expect(motion(h)).toContain("activity unverified");
+  });
+  it("clears the pin on conversation reset", () => {
+    const h = boot(); send(h);
+    dispatch(h.window, { type: "clearMessages" });
+    expect(h.doc.querySelector(".workflow-pin")).toBeNull();
+  });
+  it("does not claim replayed frames are live receipts or observed activity", () => {
+    const h = boot();
+    dispatch(h.window, { type: "historyReplay", active: true });
+    send(h); send(h, { agents: [{ ...base.agents[0], tokens_used: 30 }] });
+    dispatch(h.window, { type: "historyReplay", active: false });
+    expect(h.doc.querySelector(".workflow-pin")).toBeNull();
+    expect(card(h).textContent).toContain("historical workflow update");
+    expect(card(h).textContent).not.toContain("tokens moved");
+  });
+  it("keeps Goal completion in its existing slot", () => {
+    const h = boot();
+    dispatch(h.window, { type: "runProgress", update: { kind: "goal", id: "goal", title: "Goal", phase: "running", progress: 0.25, done: false } });
+    expect(h.doc.querySelector(".run-progress-phase")!.textContent).toBe("· running 25%");
+    expect(h.doc.querySelector(".workflow-pin")).toBeNull();
+  });
+  it("keeps the pin in flow, capped and scrollable, with wrapping phase names", () => {
+    const css = readFileSync(new URL("../media/chat.css", import.meta.url), "utf8");
+    const pinRule = css.match(/\.workflow-pin \{([^}]+)\}/)![1];
+    expect(pinRule).not.toMatch(/position:\s*(fixed|absolute)/);
+    expect(pinRule).toContain("max-height: 34vh");
+    expect(css).toMatch(/\.workflow-pin-runs\s*\{[^}]*overflow: auto/);
+    expect(css).toMatch(/\.workflow-phases\s*\{[^}]*flex-wrap: wrap/);
+    expect(css).toMatch(/\.workflow-phase\s*\{[^}]*overflow-wrap: anywhere/);
   });
 });

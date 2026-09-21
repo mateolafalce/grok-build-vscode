@@ -2717,6 +2717,92 @@ body.thinking-hidden .msg.thinking { display: none; }
   background: var(--vscode-button-secondaryHoverBackground, rgba(127, 127, 127, 0.35));
 }
 
+/* Workflows report evidence, never perpetual animation. The pin participates
+   in the same flex column as the transcript and composer on every host. */
+.workflow-pin {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 34vh;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--vscode-editorWidget-border, #555);
+  background: var(--vscode-sideBar-background);
+  padding: 4px var(--pad);
+}
+.workflow-pin.is-expanded { max-height: 45vh; }
+.workflow-pin-toggle {
+  flex: none;
+  align-self: flex-start;
+  border: 0;
+  background: none;
+  color: var(--vscode-foreground);
+  font: inherit;
+  font-weight: 600;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+.workflow-pin-runs { min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.workflow-pin-run { margin: 4px 0; }
+.workflow-pin:not(.is-expanded) .workflow-expanded { display: none; }
+.workflow-card .run-progress-row,
+.workflow-pin-run .run-progress-row { flex-wrap: wrap; align-items: baseline; }
+.workflow-card .run-progress-title,
+.workflow-pin-run .run-progress-title {
+  font-weight: 600;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.workflow-card .run-progress-phase,
+.workflow-pin-run .run-progress-phase { flex: 0 1 auto; overflow-wrap: anywhere; }
+.workflow-motion { margin-top: 4px; color: var(--vscode-foreground); overflow-wrap: anywhere; }
+.workflow-receipt, .workflow-agent-activity { font-size: 0.9em; opacity: 0.8; }
+.workflow-phases {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  padding: 0;
+  margin: 7px 0;
+  list-style: none;
+}
+.workflow-phase {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding: 2px 5px;
+  border-bottom: 2px solid var(--vscode-editorWidget-border, #777);
+}
+.workflow-phase::before { content: "○ "; }
+.workflow-phase[data-state="active"] { color: var(--vscode-foreground); border-color: var(--vscode-charts-blue, #3794ff); }
+.workflow-phase[data-state="active"]::before { content: "› "; }
+.workflow-phase[data-state="done"]::before,
+.workflow-phase[data-state="completed"]::before { content: "✓ "; }
+.workflow-phase[data-state="done"],
+.workflow-phase[data-state="completed"] { border-color: var(--vscode-charts-green, #4ec9b0); }
+.workflow-pin:not(.is-expanded) .workflow-phases {
+  font-size: 0.85em;
+  margin: 4px 0;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+.workflow-pin:not(.is-expanded) .workflow-phase {
+  flex: 0 0 auto;
+  max-width: 12em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.workflow-roster { list-style: none; padding: 0; margin: 8px 0 2px; }
+.workflow-agent { padding: 5px 0; border-top: 1px solid var(--vscode-editorWidget-border, #555); overflow-wrap: anywhere; }
+.workflow-agent[data-state*="fail"], .workflow-agent[data-state*="error"] { color: var(--vscode-errorForeground, #f48771); }
+.workflow-agent[data-state*="permission"], .workflow-agent[data-state*="blocked"] { color: var(--vscode-charts-orange, #d7ba7d); }
+.workflow-agent[data-state="cancelled"] { opacity: 0.8; }
+.workflow-control-reason { flex-basis: 100%; font-size: 0.9em; }
+.run-progress-card .run-progress-btn:disabled { opacity: 0.55; cursor: default; }
+.workflow-pin-toggle:focus-visible, .run-progress-btn:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+@media (hover: none), (pointer: coarse) {
+  .workflow-pin-toggle, .workflow-pin .run-progress-btn { min-height: 36px; }
+}
+
 .tool-group {
   font-size: var(--vscode-font-size);
 }
