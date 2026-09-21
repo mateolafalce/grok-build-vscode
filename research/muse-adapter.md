@@ -4,7 +4,9 @@
 
 `ACP_PROVIDERS` and `isAcpProvider` retain the three legacy ids. `INTERNAL_PROVIDERS` includes Muse. Renderers expose Muse only after a host `providerState` advertises it, and guard outgoing provider messages as well. Availability comes from the execution host; native Windows is disabled. CLI discovery uses `grok.museCliPath`, `MUSE_CODE_EXECUTABLE`, PATH, then the user's local bin directory.
 
-Sign-in uses the vendor's interactive CLI and `/login`. Check again connects the adapter after the user completes sign-in. MSP exposes no credential-status operation: a successful model catalog or history read is not proof of authentication. Actual credential failures remain visible through the normal conversation error path. The extension never accesses Muse's credential store.
+Sign-in uses the vendor's interactive CLI and `/login`. Settings places Muse after Claude and before GitHub; remote settings offers Check again without Connect, with cloud-specific sign-in guidance. Check again connects the adapter after the user completes sign-in. MSP exposes no credential-status operation: a successful model catalog or history read is not proof of authentication. Actual credential failures remain visible through the normal conversation error path. The extension never accesses Muse's credential store.
+
+`probeMuseVersion` reads the installed binary with `muse --version` on connection and startup, and Providers refresh re-reads it. About requires both a connected Muse entry and its `cliVersion`, so older hosts without a version produce no placeholder row. The version command is documented in [Meta's plugin quickstart](https://meta-models.github.io/muse-code-sdk/next/guides/plugins/quickstart/).
 
 The adapter requests no granted capabilities and declines user-input dialogs. It forwards text, tool calls and output, server-minted approval choices, cancellation, workspace-scoped session listing and explicit resume history. Model descriptions and the vendor's default selection are preserved. It does not offer steering, reasoning-effort controls, mode changes, deletion or compaction. Images, embedded resources and user-input dialogs remain unsupported.
 
@@ -24,7 +26,7 @@ Agent identity and implemented operations are separate sets. `providerState` est
 | `media/settings.js`: provider rows, labels and routine options | Included; the Muse row requires advertisement. Config-file rows remain the three supported files. Glyph catalogs retain Muse's text mark separately from SVG paths. |
 | `remote-frames.ts`: config read/write; `protocol.ts`, `provider-config.ts`: config types, paths and stubs | Excluded deliberately: Muse has no editable provider config. Remote read/write literal lists remain unchanged; session restart uses full agent identity. |
 | `mcp-connectors.ts`: client MCP provider types | Excluded: Muse has no implemented client MCP capability. |
-| `cli-update-plan.ts`, sidebar version/update paths, settings update rows | Existing CLI update operations only. Muse installation and updating remain CLI-owned. |
+| `cli-update-plan.ts`, sidebar version/update paths, settings update rows | Muse reports its installed CLI version; existing CLI update operations only. Muse installation and updating remain CLI-owned. |
 | `telemetry.ts`: allowed provider identities | Included through `INTERNAL_PROVIDERS`. The three historical connection booleans in telemetry/sidebar are fixed event fields, not the identity allowlist. |
 | `subscription-usage.ts`, voice routing and backend normalizers | Muse already has explicit CLI-owned/unsupported handling or the shared credential fallback. Provider-specific metrics and protocol translations are not agent allowlists. |
 | `scripts/acp-smoke.mjs`, adapter packaging | The ACP smoke remains specific to the two external ACP adapters; Muse has its separate probe and NodeNext packaging path. |

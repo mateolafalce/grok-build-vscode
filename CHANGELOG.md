@@ -1,5 +1,43 @@
 # Changelog
 
+## 4.11.0 — 2026-09-21
+
+**A fourth agent to talk to, and a workflow card you can read at a glance.** Muse Code joins Grok, Codex and Claude Code. The workflow card stops saying everything it knows all the time. And the conversation list no longer starts a process per repository to build itself.
+
+### Added
+
+- **Muse Code is a fourth provider.** Meta's coding agent now appears alongside Grok, Codex and Claude Code: sign in through Muse's own CLI, hold a conversation with streaming replies and tool approvals, resume from history, and pick a model. It does not speak the protocol the other three share, so the extension ships a small adapter that translates — the same arrangement Codex and Claude Code already run under, with the difference that this one is ours rather than a third party's.
+
+  **On Windows the row appears and explains that it cannot run**, because Meta ships no native Windows binary. The platform that decides is the one the agent runs on, not the one you are looking at — so a Windows browser driving a Mac offers Muse normally.
+
+  **Sign-in is at the desk for now.** Muse connects from a terminal on the machine running the agent; the other three can also be connected from a phone or browser.
+
+  Two of the models Muse offers are marked *contributor*, and one of them is Muse's own default. Muse's description is passed through to the picker exactly as Meta writes it: "Your content, including inter-session messages, may be used for product improvement." Worth reading before you pick one.
+
+  Deleting history and compacting a conversation are **not** implemented for Muse, and are hidden rather than offered and failing.
+
+  About names Muse's installed CLI version beside the other three, once the host has read it.
+
+### Changed
+
+- **The workflow card was rebuilt around what you actually need mid-run (#163).** It used to draw the same run three times over — a tool line, a card in the transcript, and a pinned card identical to it — and hedge its liveness three times in a row in the headline. On a phone the pinned copy alone took about half the screen.
+
+  There are two surfaces now and each has one job. **In the transcript** a running workflow is one line, the name and its status, which does not expand; when the run finishes it becomes the report and opens, because there is finally something fixed to read. **Pinned above the composer**, the card is collapsed by default: the name, one dot per reported step with the current one marked, the phase, elapsed, and a single freshness line. Tap it for the labelled phase strip, the agent budget, and one row per agent — each of which opens for its own detail. Pause, Resume and Stop stay reachable either way, because the transcript card scrolls out of reach, which was the original complaint.
+
+  **Agents that are failed, cancelled, or waiting on a permission prompt are named on the collapsed card.** They are the one thing a quiet card cannot hide: a stuck agent still arrives inside frames, so the freshness line goes on reading "updated 3s ago" while nothing actually moves.
+
+  Where the wire cannot establish that something is alive, the card still says so rather than implying it. A frame arriving is "updated 20s ago". A token moving is attributable activity and sits on the agent row it describes. "Reported running" is neither, and says that too. Nothing animates — a pulsing indicator on a local timer would be the same kind of lie as the percentage this card lost in 4.9.0.
+
+- **Counts read as counts.** `19,638` rather than `19638`, wherever a number is drawn — the workflow card, the file panel's change counts, the settings routine counts, the turn summary.
+
+- **Opening the app no longer spawns a process per repository.** With five projects on the rail, starting one session used to spawn ten adapter processes in 400ms — one Codex and one Claude per repo — each alive for about 25 seconds, each re-arming for as long as the rail was on screen, and every one of them existing to make a single history request. It is two processes now, reused across every project, so the opening burst is a few cheap round trips instead of ten process launches.
+
+### Fixed
+
+- **A closed project folder can be deleted again on Windows.** The shared history process above outlives the project that first asked for it, and a process born inside a folder holds that folder open — so after closing a project, Explorer would refuse to delete or rename it, with nothing on screen explaining why. The process now starts in your home directory, which is never a project. It makes no difference to what history you get back: that was measured against both CLIs, not assumed.
+
+- **Clear all history no longer promises more than it does.** The confirmation names the providers it will actually clear, and says what it kept. A provider that cannot delete its history no longer shows a Delete that silently does nothing.
+
 ## 4.10.0 — 2026-09-21
 
 **This release is mostly about things the app was doing without being asked.** Closing the desktop window killed the agent you had left running. Opening Settings opened a real session with every agent you had connected, to learn something the page already knew. And in two places the app had the information you wanted and showed you something else — a document in a code fence you had to scroll sideways to read, and a context meter that threw away the number first.

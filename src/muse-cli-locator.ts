@@ -26,3 +26,7 @@ export function locateMuseCli(options: {
 }
 
 export const MUSE_WINDOWS_REASON = "Muse Code is unavailable on this host: Meta does not provide a native Windows CLI";
+
+export function parseMuseVersionOutput(output: string): string {
+  return /(?:^|\s)v?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)(?:\s|$)/.exec(output.trim())?.[1] ?? "";
+}

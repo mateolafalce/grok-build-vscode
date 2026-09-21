@@ -1,5 +1,5 @@
 import { MuseBackend } from "./muse-backend";
-import { locateMuseCli, MUSE_WINDOWS_REASON } from "./muse-cli-locator";
+import { locateMuseCli, MUSE_WINDOWS_REASON, parseMuseVersionOutput } from "./muse-cli-locator";
 import type {
   Host,
   HostCancellationToken,
@@ -1139,6 +1139,7 @@ export class GrokSidebar {
   private grokVersionProbe?: Promise<string>;
   private codexVersionProbe?: Promise<string>;
   private claudeVersionProbe?: Promise<string>;
+  private museVersionProbe?: Promise<string>;
   private providerCliUpdates: Partial<Record<AcpProvider, { status: "running" | "succeeded" | "failed"; message: string }>> = {};
   private providerCliUpdate?: { provider: AcpProvider; done: Promise<void> };
   private providerModelProbes = new Map<AcpProvider, Set<Promise<boolean>>>();
@@ -2403,11 +2404,13 @@ export class GrokSidebar {
     const grokConnected = connected.grok === true && located.grok === true;
     const codexConnected = connected.codex === true && located.codex === true;
     const claudeConnected = connected.claude === true && located.claude === true;
+    const museConnected = connected.muse === true && located.muse === true;
     this.lastProviderConnected = { grok: grokConnected, codex: codexConnected, claude: claudeConnected };
     return {
       type: "providerState",
       providers: [
-        { id: "muse", connected: connected.muse === true && located.muse === true,
+        { id: "muse", connected: museConnected,
+          ...(museConnected && versions.muse ? { cliVersion: versions.muse } : {}),
           ...(needsLogin.muse ? { needsLogin: true } : {}),
           ...(process.platform === "win32" ? { unavailableReason: MUSE_WINDOWS_REASON } : {}) },
         {
@@ -2540,11 +2543,11 @@ export class GrokSidebar {
         const authenticated = probeCredentials
           ? await this.reprobeProviderCredentials(provider).catch(() => false)
           : false;
-        // Codex and Claude only. Their version is what decides
+        // Adapter CLI versions feed About and, where supported,
         // `updateAvailable`; Grok has its own update check, and re-probing it
         // would re-run the locator this method deliberately leaves alone when
         // a test forces the CLI missing.
-        if (provider === "codex" || provider === "claude") await this.reprobeProviderVersion(provider);
+        if (provider !== "grok") await this.reprobeProviderVersion(provider);
         // Promote on a SUCCESSFUL probe only. This is the sign-in that happened
         // somewhere the desk could not see; the probe is what makes it a fact
         // rather than a guess. Persisted, so it survives a reload the way the
@@ -8861,7 +8864,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
    *  The cached version is NOT deleted first. On success the probe
    *  overwrites it; on failure the last known version is better than a blank
    *  row, and unlike the update path nothing here says the binary changed. */
-  private async reprobeProviderVersion(provider: "codex" | "claude"): Promise<void> {
+  private async reprobeProviderVersion(provider: "codex" | "claude" | "muse"): Promise<void> {
     // Same guard reprobeProviderCredentials carries, for the same reason: a
     // `--version` spawn holds the binary the updater is replacing. The updater
     // drains the in-flight probe before it replaces, so a probe started after
@@ -8871,9 +8874,11 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     // pressing Update before the credential probe ahead of this one returns.
     // The updater re-reads the version itself when it finishes.
     if (this.providerCliUpdate?.provider === provider) return;
-    const inFlight = provider === "codex" ? this.codexVersionProbe : this.claudeVersionProbe;
+    const inFlight = provider === "muse" ? this.museVersionProbe
+      : provider === "codex" ? this.codexVersionProbe : this.claudeVersionProbe;
     await inFlight?.catch(() => "");
-    if (provider === "codex") this.codexVersionProbe = undefined;
+    if (provider === "muse") this.museVersionProbe = undefined;
+    else if (provider === "codex") this.codexVersionProbe = undefined;
     else this.claudeVersionProbe = undefined;
     await this.probeProviderVersion(provider).catch(() => "");
   }
@@ -8881,7 +8886,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
   private probeProviderVersion(provider: AcpProvider): Promise<string> {
     if (provider === "codex") return this.probeCodexVersion();
     if (provider === "claude") return this.probeClaudeVersion();
-    if (provider === "muse") return Promise.resolve("");
+    if (provider === "muse") return this.probeMuseVersion();
     if (this.grokVersionProbe) return this.grokVersionProbe;
     this.grokVersionProbe = (async () => {
       const cliPath = this.locateProvider("grok");
@@ -8999,6 +9004,31 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       }
     })();
     return this.claudeVersionProbe;
+  }
+
+  /** Probe the installed CLI, not the SDK/adapter package version. */
+  private probeMuseVersion(): Promise<string> {
+    if (this.museVersionProbe) return this.museVersionProbe;
+    this.museVersionProbe = (async () => {
+      const cliPath = this.locateProvider("muse");
+      if (!cliPath) return "";
+      try {
+        const { stdout } = await execGrokCli(cliPath, ["--version"], {
+          timeout: 30_000,
+          windowsHide: true,
+        });
+        const version = parseMuseVersionOutput(stdout ?? "");
+        if (!version) throw new Error("unrecognized version output");
+        this.providerCliVersions.muse = version;
+        this.postProviderState();
+        return version;
+      } catch (error) {
+        this.host.appendLine(`muse --version failed: ${(error as Error).message}`);
+        this.postProviderState();
+        return "";
+      }
+    })();
+    return this.museVersionProbe;
   }
 
   /** Once per extension upgrade, from session start, with a fresh install only

@@ -397,6 +397,10 @@
     return ((snapshot && snapshot.providers) || []).find((p) => p && p.id === "claude" && p.connected);
   }
 
+  function museProvider(snapshot) {
+    return ((snapshot && snapshot.providers) || []).find((p) => p && p.id === "muse" && p.connected);
+  }
+
   function legacyProviders(env) {
     return !env || env.providersKnown !== true;
   }
@@ -848,16 +852,6 @@
       },
     },
     {
-      id: "providerMuse", category: "providers", logo: "muse", provider: "muse",
-      title: "Muse Code", vendor: "Meta", description: "", kind: "action", keepOpen: true,
-      visible: (s) => !!(s.providers || []).find(p => p.id === "muse"),
-      enabled: (s) => !providerOf(s, "muse").unavailableReason,
-      describe: (s) => providerOf(s, "muse").unavailableReason
-        || "Run muse on the execution host and use /login, then select Check again.",
-      actionLabel: (s) => providerOf(s, "muse").connected ? "Sign out" : "Connect",
-      message: (s) => ({ type: providerOf(s, "muse").connected ? "logout" : "runGrokLogin", provider: "muse" }),
-    },
-    {
       id: "providerClaude",
       category: "providers",
       logo: "claude",
@@ -1023,6 +1017,18 @@
           ? { type: "logout", provider: "claude" }
           : { type: "runGrokLogin", provider: "claude" };
       },
+    },
+    {
+      id: "providerMuse", category: "providers", logo: "muse", provider: "muse",
+      title: "Muse Code", vendor: "Meta", description: "", kind: "action", keepOpen: true,
+      visible: (s) => !!(s.providers || []).find(p => p.id === "muse"),
+      enabled: (s) => !providerOf(s, "muse").unavailableReason,
+      describe: (s, env) => providerOf(s, "muse").unavailableReason
+        || (hostIsCloud(env)
+          ? "Muse sign-in is not available from this cloud client; if sign-in is required, use another provider."
+          : "Run muse on the execution host and use /login, then select Check again."),
+      actionLabel: (s) => providerOf(s, "muse").connected ? "Sign out" : "Connect",
+      message: (s) => ({ type: providerOf(s, "muse").connected ? "logout" : "runGrokLogin", provider: "muse" }),
     },
     {
       id: "githubConnection",
@@ -1315,6 +1321,18 @@
       },
     },
     ...cliUpdateRows("claude"),
+    {
+      id: "aboutMuseCli",
+      category: "about",
+      title: "Muse Code CLI",
+      kind: "value",
+      // Older hosts advertise Muse without its CLI version.
+      visible: (s) => !!(museProvider(s) && museProvider(s).cliVersion),
+      get: (s) => {
+        const p = museProvider(s);
+        return versionLabel(p && p.cliVersion);
+      },
+    },
     // Deliberately absent: "Codex ACP adapter" and "Claude ACP adapter".
     // The two adapters are pinned dependencies of THIS
     // extension (@agentclientprotocol/codex-acp, @agentclientprotocol/
@@ -3114,7 +3132,8 @@
         busy.disabled = true;
         busy.setAttribute("aria-busy", "true");
         control.appendChild(busy);
-      } else if (!githubStepped) {
+      } else if (!githubStepped && !(row.provider === "muse" && env && env.isRemote
+        && (!providerOf(snapshot, "muse").connected || !canSignOutFromRemote(env)))) {
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = "settings-action";
@@ -3798,7 +3817,7 @@
             input.onchange = () => addTerm(input.value);
           }
         } else if (row.kind === "action") {
-          const btn = el.querySelector(".settings-action");
+          const btn = el.querySelector(".settings-action:not(.settings-provider-recheck)");
           if (!btn) return;
           if (btn.classList.contains("settings-github-token-submit")
             || btn.classList.contains("settings-github-token-cancel")) {

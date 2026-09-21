@@ -2154,6 +2154,101 @@ function mountAt(category: string, opts: {
   return { window, root, posted, types, surface };
 }
 
+describe("Muse settings parity", () => {
+  const surfaces = [
+    { name: "desktop", env: { isDesktop: true, isRemote: false } },
+    { name: "VS Code settings tab", env: { isDesktop: false, isRemote: false } },
+    { name: "linked remote", env: { isDesktop: false, isRemote: true } },
+    { name: "cloud remote", env: { isDesktop: false, isRemote: true, hostCaps: { remoteAgentSignIn: true, remoteAgentSignOut: true } } },
+  ];
+
+  it.each(surfaces)("offers Connect only at the desk: $name", ({ env }) => {
+    const h = mountAt("providers", { env, snapshot: { providers: [{ id: "muse", connected: false }] } });
+    const row = h.root.querySelector('[data-id="providerMuse"]')!;
+    const check = row.querySelector<HTMLButtonElement>(".settings-provider-recheck")!;
+    expect(check).not.toBeNull();
+    check.click();
+    expect(h.posted).toContainEqual({ type: "recheckConnection", provider: "muse" });
+    expect(h.posted.some(m => m.type === "runGrokLogin" || m.type === "logout")).toBe(false);
+    const connect = row.querySelector<HTMLButtonElement>(".settings-action:not(.settings-provider-recheck)");
+    expect(!!connect).toBe(!env.isRemote);
+    if (connect) {
+      connect.click();
+      expect(h.posted).toContainEqual({ type: "runGrokLogin", provider: "muse" });
+    } else {
+      expect(h.posted.some(m => m.type === "runGrokLogin")).toBe(false);
+    }
+  });
+
+  it("explains the cloud limitation without sending someone to an inaccessible terminal", () => {
+    const h = mountAt("providers", { env: surfaces[3].env,
+      snapshot: { providers: [{ id: "muse", connected: false }] } });
+    expect(h.root.querySelector('[data-id="providerMuse"]')!.textContent).toContain("sign-in is not available from this cloud client");
+  });
+
+  it.each(surfaces)("hides Muse until the host advertises it on $name", ({ env }) => {
+    const h = mountAt("providers", { env, snapshot: { providers: [{ id: "grok", connected: true }] } });
+    expect(h.root.querySelector('[data-id="providerMuse"]')).toBeNull();
+    h.surface.update({ providers: [{ id: "muse", connected: false }] });
+    expect(h.root.querySelector('[data-id="providerMuse"]')).not.toBeNull();
+  });
+
+  it.each(surfaces)("uses execution-host availability on $name", ({ env }) => {
+    const reason = "Muse Code is unavailable on this host: Meta does not provide a native Windows CLI";
+    const h = mountAt("providers", { env,
+      snapshot: { providers: [{ id: "muse", connected: false, unavailableReason: reason }] } });
+    const row = h.root.querySelector('[data-id="providerMuse"]')!;
+    expect(row.textContent).toContain(reason);
+    expect(row.querySelector(".settings-provider-recheck")).toBeNull();
+    expect([...row.querySelectorAll<HTMLButtonElement>("button")].every(b => b.disabled)).toBe(true);
+  });
+
+  it.each(surfaces)("places Muse last, immediately before GitHub on $name", ({ env }) => {
+    const providers = ["muse", "grok", "codex", "claude"].map(id => ({ id, connected: false }));
+    const h = mountAt("providers", { env, snapshot: { providers, githubState: { connected: false } } });
+    const ids = [...h.root.querySelectorAll<HTMLElement>(".settings-row")]
+      .map(row => row.dataset.id).filter(id => /^provider(?:Grok|Codex|Claude|Muse)|^githubConnection/.test(id || ""));
+    expect(ids.map(id => id!.replace(/Status$|Remote$/, ""))).toEqual([
+      "providerGrok", "providerCodex", "providerClaude", "providerMuse", "githubConnection",
+    ]);
+  });
+
+  it.each(surfaces)("requires a connected provider and reported version in About on $name", ({ env }) => {
+    const h = mountAt("about", { env, snapshot: { providers: [] } });
+    const row = () => h.root.querySelector('[data-id="aboutMuseCli"]');
+    expect(row()).toBeNull();
+    h.surface.update({ providers: [{ id: "muse", connected: true }] });
+    expect(row()).toBeNull();
+    h.surface.update({ providers: [{ id: "muse", connected: true, cliVersion: "1.3.0-R3401.1" }] });
+    expect(row()!.textContent).toContain("v1.3.0-R3401.1");
+    h.surface.update({ providers: [{ id: "muse", connected: false, cliVersion: "1.3.0-R3401.1" }] });
+    expect(row()).toBeNull();
+  });
+
+  it("gates remote Sign out on the host capability", () => {
+    for (const remoteAgentSignOut of [false, true]) {
+      const h = mountAt("providers", { env: { isRemote: true, hostCaps: { remoteAgentSignOut } },
+        snapshot: { providers: [{ id: "muse", connected: true }] } });
+      const action = h.root.querySelector<HTMLButtonElement>('[data-id="providerMuse"] .settings-action:not(.settings-provider-recheck)');
+      expect(!!action).toBe(remoteAgentSignOut);
+      action?.click();
+      expect(h.posted.some(m => m.type === "logout")).toBe(remoteAgentSignOut);
+    }
+  });
+
+  it("spaces both buttons at the control container, including in the standalone settings tab", () => {
+    const h = mountAt("providers", { snapshot: { providers: [{ id: "muse", connected: false }] } });
+    const style = h.window.document.createElement("style");
+    style.textContent = readFileSync(fileURLToPath(new URL("../media/settings.css", import.meta.url)), "utf8");
+    h.window.document.head.appendChild(style);
+    const controls = h.root.querySelector('[data-id="providerMuse"] .settings-row-control')!;
+    expect(controls.querySelectorAll("button")).toHaveLength(2);
+    const css = h.window.getComputedStyle(controls as never);
+    expect(css.display).toBe("flex");
+    expect(css.gap).toBe("8px");
+  });
+});
+
 describe("CLI update actions", () => {
   const providers = [
     { id: "codex", connected: true, cliVersion: "0.149.0", latestCliVersion: "0.153.4",
