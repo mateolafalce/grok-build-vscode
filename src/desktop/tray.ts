@@ -11,11 +11,11 @@
  * screen" and "stop being reachable from my phone" were the same gesture, and
  * only the destructive reading was available. A tray separates them.
  *
- * WINDOWS AND LINUX ONLY, deliberately. macOS already makes this distinction
- * itself: closing the last window leaves the app in the dock and running, and
- * `window-all-closed` is where an app chooses to quit anyway. Adding a status
- * item there would put a second, redundant affordance in the menu bar for a
- * behaviour the platform already has.
+ * WINDOWS AND LINUX ONLY, and macOS is a gap rather than a platform that
+ * needs nothing — see `../tray-support`, which owns the rule and the reason.
+ * In short: this app quits on `window-all-closed` everywhere, so a Mac window
+ * close still ends it, and the macOS answer is the dock rather than a menu-bar
+ * item.
  */
 import type { MenuItemConstructorOptions } from "electron";
 import { DESKTOP_APP_DISPLAY_NAME } from "./host-dialogs";

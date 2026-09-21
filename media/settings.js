@@ -680,11 +680,11 @@
       description: TRAY_COPY,
       kind: "toggle",
       defaultValue: true,
-      // Keyed off traySupported, not isDesktop: macOS already keeps the app
-      // alive when its last window closes, a cloud machine has no tray, and an
-      // older host says nothing at all -- in each case the switch would have
-      // nothing behind it. `!env.isRemote` because the tray belongs to the
-      // machine the window is on, and a phone has no window there to keep.
+      // Keyed off traySupported, not isDesktop: macOS has no tray because a
+      // tray is not its answer, a cloud machine has no tray, and an older host
+      // says nothing at all -- in each case the switch would have nothing
+      // behind it. `!env.isRemote` because the tray belongs to the machine the
+      // window is on, and a phone has no window there to keep.
       visible: (s, env) => !!(s && s.traySupported === true && env && !env.isRemote),
       get: (s) => !s || s.desktopTray !== false,
       message: (value) => ({ type: "setDesktopTray", value }),

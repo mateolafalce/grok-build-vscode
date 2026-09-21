@@ -12,9 +12,13 @@
  * So the rule has one definition, `src/desktop/tray.ts` re-exports it for the
  * desktop app, and neither copy can drift from the other.
  *
- * macOS is excluded on purpose: closing the last window there already leaves
- * the app running in the dock, so a status item would be a second affordance
- * for a behaviour the platform already has.
+ * macOS is excluded, and NOT because it needs nothing. `main.ts` quits on
+ * `window-all-closed` with no darwin exception, so closing the window ends the
+ * app there exactly as it did before any of this. What macOS wants is its own
+ * convention — the app outliving its last window, the dock icon bringing it
+ * back — which destroys the window rather than hiding it, so `activate` has to
+ * rebuild it. That is a different mechanism from this one, not a wider
+ * platform list.
  */
 export function trayIsSupported(platform: NodeJS.Platform): boolean {
   return platform === "win32" || platform === "linux";

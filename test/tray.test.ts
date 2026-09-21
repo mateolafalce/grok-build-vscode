@@ -29,9 +29,10 @@ describe("tray support is a platform decision (#174)", () => {
   it.each<[NodeJS.Platform, boolean]>([
     ["win32", true],
     ["linux", true],
-    // macOS keeps the app alive in the dock when the last window closes, and
-    // `window-all-closed` is where an app decides to quit anyway. A status item
-    // there would be a second affordance for a behaviour the platform has.
+    // macOS is a gap, not a platform that needs nothing: main.ts quits on
+    // `window-all-closed` with no darwin exception. Its answer is the dock
+    // convention, which destroys the window instead of hiding it -- a
+    // different mechanism, not a longer list here. See src/tray-support.ts.
     ["darwin", false],
   ])("%s → %s", (platform, supported) => {
     expect(trayIsSupported(platform)).toBe(supported);

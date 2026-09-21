@@ -42,8 +42,10 @@ created at all — a Linux session with no StatusNotifier host, say — closing
 quits, because hiding a window nothing can bring back is worse than the problem
 it solves.
 
-**macOS is deliberately unchanged.** Closing the last window there already
-leaves the app running in the dock, so there is no tray icon on macOS.
+**macOS is not covered yet.** There is no tray icon there, and closing the
+window still quits the app. The answer on macOS is its own convention — the app
+outliving its last window, with the dock icon bringing it back — rather than a
+menu-bar item, and that is a separate change this release does not make.
 
 ## Build commands
 
