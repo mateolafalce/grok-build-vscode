@@ -13,12 +13,7 @@ export function providerDisplayName(provider: AcpProvider): string {
   return "Grok";
 }
 
-export interface ProviderConnections {
-  grok?: boolean;
-  codex?: boolean;
-  claude?: boolean;
-  muse?: boolean;
-}
+export type ProviderConnections = Partial<Record<AcpProvider, boolean>>;
 
 export interface ProviderModelCacheEntry {
   models: ModelInfo[];

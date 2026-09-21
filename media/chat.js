@@ -12,7 +12,7 @@
       if (namesMuse(message) && !museAvailable) return false;
       return hostApi.postMessage(message);
     } };
-  function offeredProviders() { return ["grok", "codex", "claude", ...(museAvailable ? ["muse"] : [])]; }
+  function offeredProviders() { return Object.keys(globalThis.GrokWebviewHelpers.PROVIDER_ACTIONS).filter(id => id !== "muse" || museAvailable); }
   const hostWait = window.GrokHostWait.get();
   const pendingPreferences = new Map();
   let sendWait = null;
@@ -2293,7 +2293,7 @@
         closePopovers();
       };
     }
-    contextPopover.appendChild(act);
+    if (globalThis.GrokWebviewHelpers.providerSupports(state.activeProvider, "compact")) contextPopover.appendChild(act);
 
     const subscription = document.createElement("section");
     subscription.className = "subscription-usage";
@@ -5381,7 +5381,7 @@
     const clearBtn = document.createElement("button");
     clearBtn.className = "history-clear-all";
     clearBtn.innerHTML = ICON.trash + "<span>Clear all history</span>";
-    clearBtn.title = "Delete all sessions in this repository's history";
+    clearBtn.title = "Delete supported providers' conversations in this repository";
     clearBtn.onclick = (e) => {
       e.stopPropagation();
       closePopovers();
@@ -5390,7 +5390,7 @@
       const repoPath = repo?.cwd || state.selectedRepoCwd;
       uiConfirm({
         title: `Clear history for “${repoLabel}”?`,
-        body: `Deletes every session for:\n${repoPath}\n\nThe current session is kept. This cannot be undone.`,
+        body: globalThis.GrokWebviewHelpers.clearHistoryConfirmation(repoPath),
         confirmLabel: "Delete All",
         danger: true,
       }).then((ok) => {
@@ -5570,7 +5570,7 @@
       // make the delete "not stick" — and then starts a fresh conversation in
       // the same project. Against a host that cannot, the button stays away
       // rather than posting a message that comes back refused.
-      if (s.provider !== "muse" && (!active || canDeleteActiveSession())) {
+      if (globalThis.GrokWebviewHelpers.providerSupports(s.provider, "deleteHistory") && (!active || canDeleteActiveSession())) {
       const delBtn = document.createElement("button");
       delBtn.className = "history-action-btn history-action-danger";
       delBtn.innerHTML = ICON.trash;
@@ -8333,12 +8333,12 @@
           ? "Update Grok Build on your computer to clear another project's history from here"
           : knownEmpty
             ? "This project has no history"
-            : "Delete all sessions in this repository's history",
+            : "Delete supported providers' conversations in this repository",
         onSelect: () => {
           const repoLabel = repo.label || cwdLeaf(repo.cwd);
           uiConfirm({
             title: `Clear history for “${repoLabel}”?`,
-            body: `Deletes every session for:\n${repo.cwd}\n\nThe current session is kept. This cannot be undone.`,
+            body: globalThis.GrokWebviewHelpers.clearHistoryConfirmation(repo.cwd),
             confirmLabel: "Delete All",
             danger: true,
           }).then((ok) => {
@@ -8678,7 +8678,7 @@
     // stays visibly disabled and says why — the menu keeps its shape, and the
     // reason is the truth rather than "the open session can't be deleted".
     const activeUndeletable = !!active && !canDeleteActiveSession();
-    if (s.provider !== "muse") items.push(null, {
+    if (globalThis.GrokWebviewHelpers.providerSupports(s.provider, "deleteHistory")) items.push(null, {
       label: "Delete",
       icon: ICON.trash,
       danger: true,
@@ -18340,7 +18340,7 @@
         museAvailable = museAdvertised && msg.providers.some(p => p && p.id === "muse" && !p.unavailableReason);
         state.providersKnown = true;
         state.providers = Array.isArray(msg.providers) ? msg.providers.filter((provider) =>
-          provider && (provider.id === "grok" || provider.id === "codex" || provider.id === "claude" || provider.id === "muse")) : [];
+          provider && Object.hasOwn(globalThis.GrokWebviewHelpers.PROVIDER_ACTIONS, provider.id)) : [];
         // A confirmed account retires its device-flow mirror. Without this the
         // "Connected" flow row would resurface in Settings after a later
         // sign-out, describing a connection that no longer exists.

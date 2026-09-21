@@ -1,8 +1,32 @@
 import { describe, expect, it } from "vitest";
 import { bootWebview, click, dispatch } from "./webview-harness";
+import { INTERNAL_PROVIDERS, supportsCompaction } from "../src/acp-backend";
 
 const description = "Your content, including inter-session messages, may be used for product improvement.";
 const reason = "Muse Code is unavailable on this host: Meta does not provide a native Windows CLI";
+
+it("retains every advertised provider's identity in the model picker", () => {
+  const h = bootWebview();
+  dispatch(h.window, { type: "providerState", providers: INTERNAL_PROVIDERS.map(id => ({ id, connected: true })) });
+  dispatch(h.window, { type: "session", sessionId: "s", provider: "grok", models: INTERNAL_PROVIDERS.map(provider => ({ provider, modelId: provider, name: provider })) });
+  click(h.window, h.doc.getElementById("gear-btn"));
+  expect(h.doc.querySelectorAll(".model-picker-row")).toHaveLength(INTERNAL_PROVIDERS.length);
+  for (const provider of INTERNAL_PROVIDERS) {
+    expect(h.doc.querySelector(`.model-picker-row .provider-${provider}`)).not.toBeNull();
+  }
+});
+
+it.each(INTERNAL_PROVIDERS)("offers compaction only when implemented for %s", provider => {
+  const h = bootWebview();
+  dispatch(h.window, { type: "providerState", providers: INTERNAL_PROVIDERS.map(id => ({ id, connected: true })) });
+  dispatch(h.window, { type: "session", sessionId: "s", provider, models: [] });
+  dispatch(h.window, { type: "contextUsage", used: 10000, window: 100000 });
+  click(h.window, h.doc.getElementById("donut"));
+  const button = h.doc.querySelector(".context-compact");
+  expect(!!button).toBe(supportsCompaction(provider));
+  if (button) click(h.window, button);
+  expect(h.posted.some(m => m.type === "send" && m.text === "/compact")).toBe(supportsCompaction(provider));
+});
 function catalog(h: ReturnType<typeof bootWebview>) {
   dispatch(h.window, { type: "session", sessionId: "s", provider: "grok", currentModelId: "grok",
     models: [{ provider: "grok", modelId: "grok", name: "Grok" },

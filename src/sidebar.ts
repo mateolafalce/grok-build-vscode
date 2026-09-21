@@ -19,7 +19,7 @@ import * as path from "node:path";
 import { spawn } from "node:child_process";
 import { AcpClient, EffortLevel, ExitPlanRequest, PermissionRequest, QuestionRequest } from "./acp";
 import type { AcpProvider, BackendSessionListEntry } from "./acp-backend";
-import { usesAdapterHistory, isInternalProvider, INTERNAL_PROVIDERS, supportsSessionDeletion, supportsModeSwitching, supportsClientMcpServers, usesPerCallContextOccupancy } from "./acp-backend";
+import { usesAdapterHistory, isInternalProvider, INTERNAL_PROVIDERS, supportsSessionDeletion, supportsHistoryDeletion, supportsModeSwitching, supportsClientMcpServers, usesPerCallContextOccupancy } from "./acp-backend";
 import { CODEX_ACP_ADAPTER_VERSION, CodexBackend, isCodexCredentialError } from "./codex-backend";
 import { locateCodexCli, resolveCodexHome } from "./codex-cli-locator";
 import { readCodexSubscriptionWindows } from "./codex-usage";
@@ -242,7 +242,7 @@ import {
   type QueuedSendEntry,
 } from "./queued-send";
 
-import { matchSlashCommand } from "./slash-filter";
+import { matchProviderSlashCommand } from "./slash-filter";
 import {
   MENTION_INDEX_LIMIT,
   MENTION_INDEX_TTL_MS,
@@ -1688,7 +1688,8 @@ export class GrokSidebar {
   }
 
   private allAdapterCatalogs(): Iterable<readonly SessionListEntry[]> {
-    return [...this.codexSessionCache.values(), ...this.claudeSessionCache.values(), ...(this.museSessionCache?.values() ?? [])];
+    return INTERNAL_PROVIDERS.filter(usesAdapterHistory)
+      .flatMap(provider => [...(this.adapterHistory(provider)?.cache?.values() ?? [])]);
   }
 
   private createProviderBackend(provider: AcpProvider): CodexBackend | ClaudeBackend | MuseBackend | undefined {
@@ -3990,7 +3991,7 @@ Only continue if you trust this code.`,
       ...overrides,
       [sid]: { ...(overrides[sid] ?? {}), activeAt },
     });
-    for (const provider of (["codex", "claude", "muse"] as const)) {
+    for (const provider of INTERNAL_PROVIDERS.filter(usesAdapterHistory)) {
       const history = this.adapterHistory(provider);
       if (!history) continue;
       for (const [key, entries] of history.cache) {
@@ -4387,7 +4388,8 @@ Only continue if you trust this code.`,
 
     // A steer should carry only its authored contribution: the editor may have
     // moved since this turn started, and ambient snippets would be repeated.
-    const slashCommand = matchSlashCommand(
+    const slashCommand = matchProviderSlashCommand(
+      session.provider,
       queuedSendsText(contributions) || authored,
       client.availableCommands.map((c) => c.name),
     );
@@ -13614,7 +13616,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       try {
         await client.start();
       } catch (error) {
-        await client.dispose(provider === "muse" ? 40_000 : undefined);
+        await client.dispose();
         throw error;
       }
       if (exited || provider === "muse" && generation !== (this.museHistoryGeneration ?? 0)) {
@@ -13647,7 +13649,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     const entry = this.adapterHistoryClients.get(provider);
     if (!entry) return Promise.resolve();
     this.adapterHistoryClients.delete(provider);
-    return forUpdate ? entry.client.disposeForUpdate() : entry.client.dispose(provider === "muse" ? 40_000 : undefined);
+    return forUpdate ? entry.client.disposeForUpdate() : entry.client.dispose();
   }
 
   private async refreshAdapterHistory(provider: AcpProvider, cwd: string, key = projectProviderKey(cwd)): Promise<void> {
@@ -14189,7 +14191,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     // A rename changes displayName but not summary.json's mtime, so the mtime-keyed cache would
     // otherwise keep serving the old name. Drop it so the next read rebuilds the entry.
     this.sessionCache.delete(id);
-    for (const adapter of (["codex", "claude", "muse"] as const)) {
+    for (const adapter of INTERNAL_PROVIDERS.filter(usesAdapterHistory)) {
       const history = this.adapterHistory(adapter);
       if (!history) continue;
       for (const [key, entries] of history.cache) {
@@ -14423,8 +14425,13 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       localNamedCwd ||
       this.historyCwdFor(origin);
     const provider = live?.provider ?? overridesNow[id]?.provider ?? cachedAdapter?.provider ?? "grok";
-    if (provider !== "grok" && !supportsSessionDeletion(provider)) {
+    if (!supportsHistoryDeletion(provider)) {
       this.host.appendLine(`[sessions] deletion is unsupported for ${provider}`);
+      this.reportRequester(
+        origin === "remote" && clientId ? this.captureRemoteRequester(clientId) : undefined,
+        "warning",
+        `${providerDisplayName(provider)} history deletion is not supported, so this conversation was not deleted.`,
+      );
       return;
     }
     // Tear the CLI down BEFORE touching the disk, not after. The live process
@@ -14629,7 +14636,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     const repoCwdKeys = new Set(repoCwds.map(normalizeFsPath));
     const exiting: Promise<void>[] = [];
     for (const s of [...this.pool]) {
-      if (s.provider === "muse") continue;
+      if (!supportsHistoryDeletion(s.provider)) continue;
       if (this.sessionHasLiveOwner(s)) continue;
       if (!repoCwdKeys.has(normalizeFsPath(this.sessionCwd(s)))) continue;
       exiting.push(this.disposeSession(s));
@@ -14645,6 +14652,17 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     // A failed refresh must not fall through to the stale cache — that is how
     // "were not cleared" became a delete. Only providers that checked succeed.
     const adapterHistoryChecked = new Set<AcpProvider>();
+    const skippedProviders = INTERNAL_PROVIDERS.filter((provider) => !supportsHistoryDeletion(provider)
+      && (this.connectedProviders().includes(provider)
+        || [...this.pool].some(s => s.provider === provider && repoCwdKeys.has(normalizeFsPath(this.sessionCwd(s))))
+        || (this.adapterHistory(provider)?.cache.get(projectProviderKey(cwd))?.length ?? 0) > 0));
+    for (const provider of skippedProviders) {
+      this.reportRequester(
+        origin === "remote" && clientId ? this.captureRemoteRequester(clientId) : undefined,
+        "warning",
+        `${providerDisplayName(provider)} history deletion is not supported, so its conversations were not cleared.`,
+      );
+    }
     for (const provider of this.connectedProviders().filter(supportsSessionDeletion)) {
       try {
         await this.refreshAdapterHistory(provider, cwd);
@@ -14675,10 +14693,9 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       entries: indexSessions({ fs: defaultFs, grokHome, cwd: sessionCwd }),
     })));
     const adapterEntries = adapterEntriesEligibleForClear(
-      [
-        { provider: "codex", entries: this.codexSessionCache.get(projectProviderKey(cwd)) ?? [] },
-        { provider: "claude", entries: this.claudeSessionCache.get(projectProviderKey(cwd)) ?? [] },
-      ],
+      INTERNAL_PROVIDERS.filter(supportsSessionDeletion).map(provider => ({
+        provider, entries: this.adapterHistory(provider)?.cache.get(projectProviderKey(cwd)) ?? [],
+      })),
       adapterHistoryChecked,
     );
     const allEntries = [...repoEntries, ...adapterEntries];
@@ -14694,7 +14711,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     const inThisConversation = origin !== "remote" || (!!clientCwd && pathsEqual(cwd, clientCwd));
     if (clearableCount === 0) {
       if (keptForAnotherOwner) this.reportProtectedSession(origin, clientId, "clear");
-      else if (inThisConversation) this.reportRequester(
+      else if (inThisConversation && !skippedProviders.length) this.reportRequester(
         origin === "remote" && clientId ? this.captureRemoteRequester(clientId) : undefined,
         "info",
         "No history to clear.",
@@ -14723,7 +14740,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         );
       }
     }
-    for (const provider of (["codex", "claude", "muse"] as const)) {
+    for (const provider of INTERNAL_PROVIDERS.filter(usesAdapterHistory)) {
       if (!supportsSessionDeletion(provider)) continue;
       if (!adapterHistoryChecked.has(provider)) continue;
       const history = this.adapterHistory(provider);
@@ -14768,7 +14785,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
 
     if (removed.length) {
       const gone = new Set(removed);
-      for (const adapter of (["codex", "claude", "muse"] as const)) {
+      for (const adapter of INTERNAL_PROVIDERS.filter(usesAdapterHistory)) {
         const history = this.adapterHistory(adapter);
         if (!history) continue;
         for (const [key, entries] of history.cache) {
@@ -16770,7 +16787,8 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     // it (a /compact that *grew* the context 6x in testing — see
     // research/compact.md). Confirmed commands flip the prompt order so the
     // command keeps position 0 and the context trails it.
-    const slashCommand = matchSlashCommand(
+    const slashCommand = matchProviderSlashCommand(
+      session.provider,
       text,
       client.availableCommands.map((c) => c.name),
     );

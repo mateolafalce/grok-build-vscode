@@ -145,6 +145,27 @@
   // Same contract as createPendingOverlay in webview-helpers.js. The VS Code
   // rail is a standalone webview and does not load that file, so the helper
   // is inlined; keep the two in lockstep.
+  /** The helpers bundle, or null — see above: this webview may run without it. */
+  function railHelpers() {
+    return typeof globalThis !== "undefined" ? globalThis.GrokWebviewHelpers || null : null;
+  }
+
+  /**
+   * Whether a session's provider can really delete history.
+   *
+   * Standalone there is no capability table, and the answer is the one this
+   * rail gave before the table existed: yes. Offering a Delete that cannot run
+   * would be the worse failure, but so would hiding it from the three
+   * providers that have always had it — and no surface that can reach a Muse
+   * conversation runs without the helpers.
+   */
+  function deleteHistorySupported(provider) {
+    const helpers = railHelpers();
+    return helpers && typeof helpers.providerSupports === "function"
+      ? helpers.providerSupports(provider, "deleteHistory")
+      : true;
+  }
+
   function createPendingOverlay(opts) {
     const helpers = typeof globalThis !== "undefined" ? globalThis.GrokWebviewHelpers : null;
     if (helpers && typeof helpers.createPendingOverlay === "function") {
@@ -1604,7 +1625,10 @@
         onSelect: async () => {
           const ok = await railDialog({
             title: `Clear history for “${repo.label || leaf(repo.cwd)}”?`,
-            body: "Every conversation in this project is deleted. This cannot be undone.",
+            // The rail runs standalone — every other helper use in this file
+            // guards for the bundle being absent, and so must this one.
+            body: railHelpers()?.clearHistoryConfirmation(repo.cwd)
+              || "Every conversation in this project is deleted. This cannot be undone.",
             confirmLabel: "Clear all",
             danger: true,
           });
@@ -1817,7 +1841,10 @@
             togglePinnedRow(s, cwd),
         },
         null,
-        {
+        // Standalone, the rail has no capability table to consult, so it keeps
+        // the behaviour it had before there was one. Every surface that can
+        // actually reach a Muse conversation loads the helpers and hides this.
+        deleteHistorySupported(s.provider) ? {
           label: "Delete",
           danger: true,
           onSelect: async () => {
@@ -1829,7 +1856,7 @@
             });
             if (ok) vscode.postMessage({ type: "deleteSession", id: s.id, name: s.displayName, cwd });
           },
-        },
+        } : null,
       ]);
     };
     actions.appendChild(menuBtn);

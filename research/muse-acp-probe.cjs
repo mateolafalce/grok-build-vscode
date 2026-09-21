@@ -60,7 +60,11 @@ async function main() {
     assert.equal(answer.trim(), token, "second answer must recall the first turn");
   } catch (error) { failure = error; }
   finally {
-    // The SDK allows 30 seconds to drain, then a short termination grace.
+    // Deliberately generous, and ONLY here. A probe exists to prove the child
+    // exits, so it must not be the thing that killed it — but this is not
+    // evidence that a teardown needs the time. Measured on a Mac against the
+    // real CLI, twice, at the host's own default: 30ms, child exiting cleanly.
+    // The product uses the same three-second budget as every other provider.
     await client.dispose(40_000);
     const code = await bounded(exit, 5000, "adapter exit observation");
     const observed = /MUSE_CHILD_EXIT (\{[^\r\n]+\})/.exec(diagnostics);

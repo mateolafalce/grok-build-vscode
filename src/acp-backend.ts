@@ -7,32 +7,55 @@ export type LegacyAcpProvider = (typeof ACP_PROVIDERS)[number];
 export type AcpProvider = (typeof INTERNAL_PROVIDERS)[number];
 
 export function isInternalProvider(value: unknown): value is AcpProvider {
-  return isAcpProvider(value) || value === "muse";
+  return typeof value === "string" && (INTERNAL_PROVIDERS as readonly string[]).includes(value);
+}
+
+// Exhaustive: each new provider must explicitly opt into implemented actions.
+const PROVIDER_ACTIONS: Record<AcpProvider, {
+  deleteHistory: boolean;
+  compact: boolean;
+  adapterHistory: boolean;
+  modeSwitching: boolean;
+  perCallContext: boolean;
+  clientMcp: boolean;
+}> = {
+  grok: { deleteHistory: true, compact: true, adapterHistory: false, modeSwitching: true, perCallContext: false, clientMcp: true },
+  codex: { deleteHistory: true, compact: true, adapterHistory: true, modeSwitching: true, perCallContext: true, clientMcp: true },
+  claude: { deleteHistory: true, compact: true, adapterHistory: true, modeSwitching: true, perCallContext: true, clientMcp: true },
+  muse: { deleteHistory: false, compact: false, adapterHistory: true, modeSwitching: false, perCallContext: false, clientMcp: false },
+};
+
+export function supportsHistoryDeletion(provider: AcpProvider): boolean {
+  return PROVIDER_ACTIONS[provider].deleteHistory;
+}
+
+export function supportsCompaction(provider: AcpProvider): boolean {
+  return PROVIDER_ACTIONS[provider].compact;
 }
 
 export function supportsSessionDeletion(provider: AcpProvider): boolean {
-  return provider === "codex" || provider === "claude";
+  return usesAdapterHistory(provider) && supportsHistoryDeletion(provider);
 }
 
 export function supportsModeSwitching(provider: AcpProvider): boolean {
-  return provider !== "muse";
+  return PROVIDER_ACTIONS[provider].modeSwitching;
 }
 
 export function usesPerCallContextOccupancy(provider: AcpProvider): boolean {
-  return provider === "codex" || provider === "claude";
+  return PROVIDER_ACTIONS[provider].perCallContext;
 }
 
 export function supportsClientMcpServers(provider: AcpProvider): boolean {
-  return provider !== "muse";
+  return PROVIDER_ACTIONS[provider].clientMcp;
 }
 
 export function isAcpProvider(value: unknown): value is LegacyAcpProvider {
-  return value === "grok" || value === "codex" || value === "claude";
+  return typeof value === "string" && (ACP_PROVIDERS as readonly string[]).includes(value);
 }
 
 /** Providers whose conversations live in an adapter catalog, not ~/.grok. */
 export function usesAdapterHistory(provider: AcpProvider): boolean {
-  return provider === "codex" || provider === "claude" || provider === "muse";
+  return PROVIDER_ACTIONS[provider].adapterHistory;
 }
 
 export const isAdapterProvider = usesAdapterHistory;

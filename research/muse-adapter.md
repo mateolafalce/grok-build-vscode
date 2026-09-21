@@ -6,7 +6,30 @@
 
 Sign-in uses the vendor's interactive CLI and `/login`. Check again connects the adapter after the user completes sign-in. MSP exposes no credential-status operation: a successful model catalog or history read is not proof of authentication. Actual credential failures remain visible through the normal conversation error path. The extension never accesses Muse's credential store.
 
-The adapter requests no granted capabilities and declines user-input dialogs. It forwards text, tool calls and output, server-minted approval choices, cancellation, workspace-scoped session listing and explicit resume history. Model descriptions and the vendor's default selection are preserved. It does not offer steering, reasoning-effort controls, mode changes or deletion. Images, embedded resources and user-input dialogs remain unsupported.
+The adapter requests no granted capabilities and declines user-input dialogs. It forwards text, tool calls and output, server-minted approval choices, cancellation, workspace-scoped session listing and explicit resume history. Model descriptions and the vendor's default selection are preserved. It does not offer steering, reasoning-effort controls, mode changes, deletion or compaction. Images, embedded resources and user-input dialogs remain unsupported.
+
+## Provider enumeration audit
+
+Agent identity and implemented operations are separate sets. `providerState` establishes host availability; it does not establish that a provider supports an action. The desktop validator ships with its host and accepts `INTERNAL_PROVIDERS`. Config handlers still reject providers without a config file.
+
+| Enumeration | Muse decision |
+| --- | --- |
+| `acp-backend.ts`: `INTERNAL_PROVIDERS`, `isInternalProvider`, capability table | Included as an agent; every capability is explicit. History listing is supported; deletion, compaction, mode switching, client MCP and per-call occupancy are not. Grok history deletion is filesystem-based, distinct from ACP session deletion. |
+| `acp-backend.ts`: `ACP_PROVIDERS`, `isAcpProvider` | Legacy vocabulary remains frozen at three. |
+| `desktop/webview-msg-validate.ts`: provider-bearing messages | Included through the shared identity predicate. `github` remains exclusive to device-login cancellation. |
+| `provider-ui.ts`: order, connections, model caches, names, onboarding and history | Included. `adapterActivityAt` retains the measured Codex/Claude timestamp policy; Muse uses reported activity with host observations. |
+| `sidebar.ts`: locator, backend factory, advertised state, history caches, model/default selection, credential checks | Included. Adapter iteration derives from the shared provider set and history capability. Legacy connection migration leaves new providers unconnected. |
+| `sidebar.ts`: clear-history and single-row deletion | Excluded by capability. Clear-history reports why Muse conversations were not cleared, preserves its processes/cache, and does not call that an empty history. |
+| `media/webview-helpers.js`, `chat.js`, `projects-rail.js`: provider identity and actions | Shared action catalog includes Muse with deletion and compaction disabled. Both renderers omit Delete; chat omits Compact. All clear-history dialogs name only supported providers. Muse availability still requires host advertisement, including when served against an older host. |
+| `media/settings.js`: provider rows, labels and routine options | Included; the Muse row requires advertisement. Config-file rows remain the three supported files. Glyph catalogs retain Muse's text mark separately from SVG paths. |
+| `remote-frames.ts`: config read/write; `protocol.ts`, `provider-config.ts`: config types, paths and stubs | Excluded deliberately: Muse has no editable provider config. Remote read/write literal lists remain unchanged; session restart uses full agent identity. |
+| `mcp-connectors.ts`: client MCP provider types | Excluded: Muse has no implemented client MCP capability. |
+| `cli-update-plan.ts`, sidebar version/update paths, settings update rows | Existing CLI update operations only. Muse installation and updating remain CLI-owned. |
+| `telemetry.ts`: allowed provider identities | Included through `INTERNAL_PROVIDERS`. The three historical connection booleans in telemetry/sidebar are fixed event fields, not the identity allowlist. |
+| `subscription-usage.ts`, voice routing and backend normalizers | Muse already has explicit CLI-owned/unsupported handling or the shared credential fallback. Provider-specific metrics and protocol translations are not agent allowlists. |
+| `scripts/acp-smoke.mjs`, adapter packaging | The ACP smoke remains specific to the two external ACP adapters; Muse has its separate probe and NodeNext packaging path. |
+
+`provider-enumerations.test.ts` compares the shared renderer catalog, settings rows, host advertisement, locator coverage, backend/history routing, telemetry and desktop validation against `INTERNAL_PROVIDERS`, while pinning config exclusions. DOM tests exercise both renderers and the model picker. Host tests cover Muse-only and mixed clear-history and the actual compact send path for all four providers. `matchSlashCommand` retains its empty-list timing fallback; `matchProviderSlashCommand` applies compaction capability before any compact accounting or success message.
 
 A prompt waits for its matching terminal notification, not admission. Projection retains per-item emitted text across turns, suppresses duplicates and stale revisions, and logs prefix rewrites that ACP's append-only text channel cannot represent. Reminder items never contribute answer text. Approval presentation receipts are separate from decision commands; only offered choice ids may be sent.
 
