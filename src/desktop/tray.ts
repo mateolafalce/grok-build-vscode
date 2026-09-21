@@ -32,10 +32,16 @@ export const TRAY_CONFIG_FULL_KEY = "grok." + TRAY_CONFIG_KEY;
 export const TRAY_NOTICE_CONFIG_KEY = "desktop.trayNoticeShown";
 export const TRAY_NOTICE_CONFIG_FULL_KEY = "grok." + TRAY_NOTICE_CONFIG_KEY;
 
-/** Platforms where a tray icon is the right answer — see the file comment. */
-export function trayIsSupported(platform: NodeJS.Platform): boolean {
-  return platform === "win32" || platform === "linux";
-}
+/**
+ * Platforms where a tray icon is the right answer — see the file comment.
+ *
+ * Defined one level up and re-exported here: `sidebar.ts` needs the same rule
+ * to decide whether to offer the settings row, and it cannot import out of
+ * `out/desktop/` without that module being packed into the VS Code vsix. See
+ * `../tray-support` for the whole story.
+ */
+export { trayIsSupported } from "../tray-support";
+import { trayIsSupported } from "../tray-support";
 
 /**
  * On by default, which is the point of the feature: a person who closes the

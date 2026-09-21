@@ -142,6 +142,30 @@ describe("how the tray setting is stored and reached (#174)", () => {
   });
 
   /**
+   * The near-miss this guards against, caught by `check:vsix` at packaging
+   * time: `sidebar.ts` needs the platform rule to decide whether to offer the
+   * row, and importing it from `src/desktop/` made `out/sidebar.js` require a
+   * module `.vscodeignore` keeps out of the vsix. That installs fine and dies
+   * on activation — the #101 class. The rule therefore lives one level up and
+   * `src/desktop/tray.ts` re-exports it, which is easy to "tidy" back.
+   */
+  it("keeps the platform rule out of the desktop tree, with one definition", () => {
+    const sidebarSrc = readFileSync(
+      fileURLToPath(new URL("../src/sidebar.ts", import.meta.url)),
+      "utf8",
+    );
+    expect(sidebarSrc).toContain('from "./tray-support"');
+    expect(sidebarSrc).not.toContain('from "./desktop/tray"');
+    // Re-exported, not restated: two copies is how a row appears on macOS.
+    const traySrc = readFileSync(
+      fileURLToPath(new URL("../src/desktop/tray.ts", import.meta.url)),
+      "utf8",
+    );
+    expect(traySrc).toContain('from "../tray-support"');
+    expect(traySrc).not.toMatch(/function trayIsSupported/);
+  });
+
+  /**
    * VS Code has no tray, so the key is deliberately absent from
    * `contributes.configuration` — a setting that does nothing is worse than no
    * setting. That absence is easy to "fix" by someone tidying the two lists

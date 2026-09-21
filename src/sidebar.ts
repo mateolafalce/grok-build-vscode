@@ -383,11 +383,11 @@ import {
   resolveChatOpenFilePath,
 } from "./media-serve";
 import { isExecutableOpenTarget, revalidateOpenFileForUse } from "./desktop/desktop-policy";
-// Pure (its only electron import is a type, erased at compile time), so VS
-// Code can read the platform rule without pulling Electron in. Shared
-// rather than restated: a second copy of "which platforms have a tray" is
-// how a row appears on macOS six months from now.
-import { trayIsSupported } from "./desktop/tray";
+// Top-level on purpose — `out/desktop/**` is not packed into the vsix, and a
+// tray module has no business being excepted into it. Shared rather than
+// restated: a second copy of "which platforms have a tray" is how a row
+// appears on macOS six months from now.
+import { trayIsSupported } from "./tray-support";
 import {
   describeFfmpegProblem,
   ffmpegInstallHint,
