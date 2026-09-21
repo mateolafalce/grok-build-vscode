@@ -2228,9 +2228,7 @@ export class GrokSidebar {
     const delays = [0, 2_000, 5_000, 10_000, 20_000];
     for (const delay of delays) {
       if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
-      if (provider === "claude"
-        ? await this.deviceLoginCredentialReady(provider)
-        : await this.reprobeProviderCredentials(provider)) {
+      if (await this.deviceLoginCredentialReady(provider)) {
         this.host.appendLine(`[${provider}] device login: credential verified`);
         // Say it about the needs-login flag too, and not only about `connected`.
         // For grok and codex this is a no-op -- `reprobeProviderCredentials`
@@ -2301,8 +2299,12 @@ export class GrokSidebar {
    * `claude auth status` `{ loggedIn: true }` is the authority. An unreadable
    * status falls back to the ACP probe rather than failing closed on a CLI
    * that printed something we have not seen.
+   * Muse has no credential-status probe: after a successful `muse login`,
+   * file presence confirms that a credential landed, not that it is valid.
+   * Any later authentication failure uses the normal needs-login path.
    */
   private async deviceLoginCredentialReady(provider: AcpProvider): Promise<boolean> {
+    if (provider === "muse") return this.providerCredentialFilePresent(provider);
     if (provider === "claude") {
       const cliPath = this.locateProvider("claude");
       if (!cliPath) return false;
@@ -2320,6 +2322,7 @@ export class GrokSidebar {
    *  different next actions. */
   private providerCredentialFilePresent(provider: AcpProvider): boolean {
     try {
+      if (provider === "muse") return fs.existsSync(path.join(os.homedir(), ".config", "muse", "auth.json"));
       if (provider === "codex") return fs.existsSync(path.join(resolveCodexHome(), "auth.json"));
       // GROK_HOME, not a hardcoded ~/.grok: the CLI honours it and so does the
       // rest of this host, so hardcoding made the fallback miss a credential
@@ -11926,10 +11929,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         // visible at all. Run the CLI's headless flow instead and put the URL
         // and code in the transcript. Everything below this branch is the desk
         // path and is deliberately unchanged.
-        if (origin === "remote" && provider === "muse") {
-          this.post({ type: "onboarding", state: "muse-login", platform: process.platform, provider });
-          break;
-        }
         if (origin === "remote") {
           await this.startDeviceLogin(provider, cliPath, clientId);
           break;
@@ -11940,7 +11939,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         // only the second is about the conversation on screen. Read the flag
         // before the probe below can clear it.
         const renewing = !!this.providerNeedsLogin?.[provider];
-        const loginArgs = provider === "muse" ? [] : provider === "claude" ? ["auth", "login"] : ["login"];
+        const loginArgs = provider === "claude" ? ["auth", "login"] : ["login"];
         const term = this.host.createTerminal({
           name: `${providerDisplayName(provider)} Login`,
           shellPath: cliPath,

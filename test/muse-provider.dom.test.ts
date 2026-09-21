@@ -34,6 +34,26 @@ function catalog(h: ReturnType<typeof bootWebview>) {
 }
 
 describe("Muse host advertisement", () => {
+  it.each(["connectProvider", "connectRemote"])("gates %s on advertisement even with remote sign-in capability", act => {
+    const h = bootWebview({ remote: true });
+    dispatch(h.window, { type: "initialState", capabilities: { remoteAgentSignIn: true } });
+    const button = h.doc.createElement("button");
+    button.className = "onb-action";
+    button.dataset.act = act;
+    button.dataset.provider = "muse";
+    h.doc.getElementById("welcome-onboarding")!.appendChild(button);
+    h.posted.length = 0;
+    click(h.window, button);
+    expect(h.posted).toEqual([]);
+    dispatch(h.window, { type: "providerState", providers: [{ id: "muse", connected: false }] });
+    click(h.window, button);
+    expect(h.posted).toContainEqual({ type: "runGrokLogin", provider: "muse" });
+    dispatch(h.window, { type: "providerState", providers: [{ id: "grok", connected: true }] });
+    h.posted.length = 0;
+    click(h.window, button);
+    expect(h.posted).toEqual([]);
+  });
+
   it.each([false, true])("sends no Muse message without host advertisement (remote=%s)", remote => {
     const h = bootWebview({ remote });
     dispatch(h.window, { type: "initialState", capabilities: {} });
@@ -80,7 +100,7 @@ it.each([false, true])("shows only the advertised disabled host row in Settings 
   const api = (h.window as any).GrokSettings;
   const root = h.doc.createElement("div"); h.doc.body.appendChild(root);
   const posted: any[] = [];
-  const env = api.defaultEnv({ isRemote: remote, providersKnown: true });
+  const env = api.defaultEnv({ isRemote: remote, providersKnown: true, hostCaps: { remoteAgentSignIn: true } });
   const surface = api.mount(root, { standalone: true, category: "providers", env,
     snapshot: api.defaultSnapshot({ providers: [{ id: "grok", connected: true }] }), post: (m: any) => posted.push(m) });
   expect(root.textContent).not.toContain("Muse Code");

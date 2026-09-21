@@ -1021,28 +1021,32 @@
     {
       id: "providerMuse", category: "providers", logo: "muse", provider: "muse",
       title: "Muse Code", vendor: "Meta", description: "", kind: "action", keepOpen: true,
-      visible: (s) => !!(s.providers || []).find(p => p.id === "muse"),
+      visible: (s, env) => !!(env && !env.isRemote && env.providersKnown
+        && (s.providers || []).some(p => p.id === "muse")),
       enabled: (s) => !providerOf(s, "muse").unavailableReason,
-      // A remote has no button on this row, so this sentence is the only thing
-      // on it that can report state -- and a phone that was just told to run
-      // /login on the host had no other way to learn that it had worked.
-      // `providerDescription` is what every other provider says for exactly
-      // this, including the connected-but-expired case; only the instruction
-      // for the sign-in we cannot perform from here is ours.
-      describe: (s, env) => {
-        const p = providerOf(s, "muse");
-        if (p.unavailableReason) return p.unavailableReason;
-        if (p.connected) {
-          return p.needsLogin === true
-            ? `${providerDescription(p)} Run muse and use /login on the machine running the agent.`
-            : providerDescription(p);
-        }
-        return hostIsCloud(env)
-          ? "Muse sign-in is not available from this cloud client; if sign-in is required, use another provider."
-          : "Run muse on the execution host and use /login, then select Check again.";
-      },
-      actionLabel: (s) => providerOf(s, "muse").connected ? "Sign out" : "Connect",
-      message: (s) => ({ type: providerOf(s, "muse").connected ? "logout" : "runGrokLogin", provider: "muse" }),
+      describe: (s) => providerOf(s, "muse").unavailableReason || providerDescription(providerOf(s, "muse")),
+      actionLabel: (s) => providerAction(providerOf(s, "muse")),
+      message: (s) => ({ type: providerConnectedNow(s, "muse") ? "logout" : "runGrokLogin", provider: "muse" }),
+    },
+    {
+      id: "providerMuseStatus", category: "providers", logo: "muse", provider: "muse",
+      title: "Muse Code", vendor: "Meta", description: "", kind: "status",
+      visible: (s, env) => !!(env && env.isRemote && env.providersKnown
+        && (s.providers || []).some(p => p.id === "muse")
+        && !remoteProviderActionable(s, env, "muse")),
+      describe: (s, env) => providerOf(s, "muse").unavailableReason || providerRemoteDescribe(s, env, "muse"),
+    },
+    {
+      id: "providerMuseRemote", category: "providers", logo: "muse", provider: "muse",
+      title: "Muse Code", vendor: "Meta", description: "", kind: "action", keepOpen: true,
+      visible: (s, env) => !!(env && env.isRemote && env.providersKnown
+        && (s.providers || []).some(p => p.id === "muse")
+        && remoteProviderActionable(s, env, "muse")),
+      enabled: (s) => !providerOf(s, "muse").unavailableReason,
+      local: (s) => !providerConnectedNow(s, "muse") ? "connectWizard:muse" : "",
+      describe: (s, env) => providerOf(s, "muse").unavailableReason || providerRemoteDescribe(s, env, "muse"),
+      actionLabel: (s) => providerAction(providerOf(s, "muse")),
+      message: (s) => ({ type: providerConnectedNow(s, "muse") ? "logout" : "runGrokLogin", provider: "muse" }),
     },
     {
       id: "githubConnection",
@@ -3146,8 +3150,7 @@
         busy.disabled = true;
         busy.setAttribute("aria-busy", "true");
         control.appendChild(busy);
-      } else if (!githubStepped && !(row.provider === "muse" && env && env.isRemote
-        && (!providerOf(snapshot, "muse").connected || !canSignOutFromRemote(env)))) {
+      } else if (!githubStepped) {
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = "settings-action";

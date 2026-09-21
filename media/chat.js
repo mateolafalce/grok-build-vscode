@@ -10093,7 +10093,7 @@
   function remoteConnectPanel(mode, info, ver) {
     const device = info.device;
     const provider = info.provider
-      || (mode === "codex-login" ? "codex" : mode === "claude-login" ? "claude" : mode === "auth-required" ? "grok" : "");
+      || (mode === "codex-login" ? "codex" : mode === "claude-login" ? "claude" : mode === "muse-login" ? "muse" : mode === "auth-required" ? "grok" : "");
     // The products' own names, everywhere this panel speaks. Not "Grok": that
     // is the model, the extension is Grok Build, and a heading that disagrees
     // with the button beneath it reads as two different things to connect.
@@ -10264,7 +10264,7 @@
         const rec = cloudHost && id === "grok" ? " (recommended)" : "";
         // The mark the reader already knows from the model picker and the
         // provider rows. currentColor, so it takes the button's foreground.
-        return `<button class="onb-action" type="button" data-act="${id === "muse" ? "connectProvider" : "connectRemote"}" data-provider="${id}">`
+        return `<button class="onb-action" type="button" data-act="connectRemote" data-provider="${id}">`
           + providerLogoMarkup(id)
           + `<span>Connect ${NAMES[id]}${rec}</span></button>`;
       })
@@ -10472,7 +10472,7 @@
     const onb = $("welcome-onboarding");
     const ver = $("welcome-version");
     if (!onb) return;
-    if (IS_REMOTE && (mode === "connect-agent" || mode === "codex-login" || mode === "claude-login" || mode === "auth-required")) {
+    if (IS_REMOTE && (mode === "connect-agent" || mode === "codex-login" || mode === "claude-login" || mode === "auth-required" || mode === "muse-login" && museAvailable)) {
       // The card is an ENTRY POINT, not a second renderer: a live flow belongs
       // to the wizard, so the card keeps showing the offer underneath it.
       // The card NEVER renders a live flow. Stripping it only while the wizard
@@ -10500,7 +10500,7 @@
       onb.innerHTML = `<div class="onb"><p class="onb-heading">Muse Code</p>`
         + `<p class="onb-desc">${escapeHtml(reason || (mode === "missing-muse"
           ? "Install Meta's Muse Code CLI on the execution host, then re-check."
-          : "Run muse in a terminal on the execution host and use /login, then re-check."))}</p>`
+          : "Run muse login on the execution host, then re-check."))}</p>`
         + (reason ? "" : `${!IS_REMOTE && mode !== "missing-muse" ? '<button class="onb-action" data-act="connectProvider" data-provider="muse">Open Muse sign-in</button>' : ''}<button class="onb-action" data-act="recheckProvider" data-provider="muse">Re-check</button>`)
         + `</div>`;
       return;

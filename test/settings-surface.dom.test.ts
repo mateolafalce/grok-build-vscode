@@ -2158,62 +2158,67 @@ describe("Muse settings parity", () => {
   const surfaces = [
     { name: "desktop", env: { isDesktop: true, isRemote: false } },
     { name: "VS Code settings tab", env: { isDesktop: false, isRemote: false } },
-    { name: "linked remote", env: { isDesktop: false, isRemote: true } },
+    { name: "linked remote", env: { isDesktop: false, isRemote: true, hostCaps: { remoteAgentSignIn: true } } },
     { name: "cloud remote", env: { isDesktop: false, isRemote: true, hostCaps: { remoteAgentSignIn: true, remoteAgentSignOut: true } } },
   ];
 
-  it.each(surfaces)("offers Connect only at the desk: $name", ({ env }) => {
+  const museRow = '[data-id="providerMuse"], [data-id="providerMuseStatus"], [data-id="providerMuseRemote"]';
+
+  it.each(surfaces)("offers Connect on $name", ({ env }) => {
     const h = mountAt("providers", { env, snapshot: { providers: [{ id: "muse", connected: false }] } });
-    const row = h.root.querySelector('[data-id="providerMuse"]')!;
+    const row = h.root.querySelector(museRow)!;
+    expect(row.getAttribute("data-id")).toBe(env.isRemote ? "providerMuseRemote" : "providerMuse");
     const check = row.querySelector<HTMLButtonElement>(".settings-provider-recheck")!;
     expect(check).not.toBeNull();
     check.click();
     expect(h.posted).toContainEqual({ type: "recheckConnection", provider: "muse" });
     expect(h.posted.some(m => m.type === "runGrokLogin" || m.type === "logout")).toBe(false);
     const connect = row.querySelector<HTMLButtonElement>(".settings-action:not(.settings-provider-recheck)");
-    expect(!!connect).toBe(!env.isRemote);
-    if (connect) {
-      connect.click();
-      expect(h.posted).toContainEqual({ type: "runGrokLogin", provider: "muse" });
-    } else {
-      expect(h.posted.some(m => m.type === "runGrokLogin")).toBe(false);
-    }
+    expect(connect?.textContent).toBe("Connect");
+    connect!.click();
+    expect(h.posted).toContainEqual({ type: "runGrokLogin", provider: "muse" });
   });
 
   it.each(surfaces)("says whether the account is connected on $name", ({ env }) => {
     const h = mountAt("providers", { env, snapshot: { providers: [{ id: "muse", connected: true }] } });
-    const row = () => h.root.querySelector('[data-id="providerMuse"]')!;
-    // The remote rows carry no button at all, so this sentence is the only
-    // thing on them that reports state: a phone told to run /login on the host
-    // must be able to see that it worked.
+    const row = () => h.root.querySelector(museRow)!;
     expect(row().textContent).toContain("This account is connected");
     expect(row().textContent).not.toContain("/login");
     expect(row().textContent).not.toContain("use another provider");
     h.surface.update({ providers: [{ id: "muse", connected: true, needsLogin: true }] });
     expect(row().textContent).toContain("needs to sign in again");
-    expect(row().textContent).toContain("Run muse and use /login on the machine running the agent");
+    const connect = row().querySelector<HTMLButtonElement>(".settings-action:not(.settings-provider-recheck)")!;
+    expect(connect.textContent).toBe("Sign in again");
+    connect.click();
+    expect(h.posted).toContainEqual({ type: "runGrokLogin", provider: "muse" });
+    expect(h.posted.some(m => m.type === "logout")).toBe(false);
     h.surface.update({ providers: [{ id: "muse", connected: false }] });
     expect(row().textContent).not.toContain("This account is connected");
   });
 
-  it("explains the cloud limitation without sending someone to an inaccessible terminal", () => {
-    const h = mountAt("providers", { env: surfaces[3].env,
+  it("keeps a status row on hosts without remote sign-in capability", () => {
+    const h = mountAt("providers", { env: { isRemote: true, hostCaps: {} },
       snapshot: { providers: [{ id: "muse", connected: false }] } });
-    expect(h.root.querySelector('[data-id="providerMuse"]')!.textContent).toContain("sign-in is not available from this cloud client");
+    expect(h.root.querySelector('[data-id="providerMuseStatus"]')).not.toBeNull();
+    expect(h.root.querySelector(museRow)!.querySelector("button")).toBeNull();
   });
 
   it.each(surfaces)("hides Muse until the host advertises it on $name", ({ env }) => {
     const h = mountAt("providers", { env, snapshot: { providers: [{ id: "grok", connected: true }] } });
-    expect(h.root.querySelector('[data-id="providerMuse"]')).toBeNull();
+    expect(h.root.querySelector(museRow)).toBeNull();
     h.surface.update({ providers: [{ id: "muse", connected: false }] });
-    expect(h.root.querySelector('[data-id="providerMuse"]')).not.toBeNull();
+    expect(h.root.querySelector(museRow)).not.toBeNull();
+    const connect = h.root.querySelector(museRow)!.querySelector<HTMLButtonElement>(".settings-action:not(.settings-provider-recheck)")!;
+    h.surface.update({ providers: [{ id: "grok", connected: true }] });
+    connect.click(); // A retained control cannot send a new wire value to an older host.
+    expect(h.posted.some(m => m.type === "runGrokLogin")).toBe(false);
   });
 
   it.each(surfaces)("uses execution-host availability on $name", ({ env }) => {
     const reason = "Muse Code is unavailable on this host: Meta does not provide a native Windows CLI";
     const h = mountAt("providers", { env,
       snapshot: { providers: [{ id: "muse", connected: false, unavailableReason: reason }] } });
-    const row = h.root.querySelector('[data-id="providerMuse"]')!;
+    const row = h.root.querySelector(museRow)!;
     expect(row.textContent).toContain(reason);
     expect(row.querySelector(".settings-provider-recheck")).toBeNull();
     expect([...row.querySelectorAll<HTMLButtonElement>("button")].every(b => b.disabled)).toBe(true);
@@ -2245,7 +2250,7 @@ describe("Muse settings parity", () => {
     for (const remoteAgentSignOut of [false, true]) {
       const h = mountAt("providers", { env: { isRemote: true, hostCaps: { remoteAgentSignOut } },
         snapshot: { providers: [{ id: "muse", connected: true }] } });
-      const action = h.root.querySelector<HTMLButtonElement>('[data-id="providerMuse"] .settings-action:not(.settings-provider-recheck)');
+      const action = h.root.querySelector(museRow)!.querySelector<HTMLButtonElement>('.settings-action:not(.settings-provider-recheck)');
       expect(!!action).toBe(remoteAgentSignOut);
       action?.click();
       expect(h.posted.some(m => m.type === "logout")).toBe(remoteAgentSignOut);

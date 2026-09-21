@@ -52,6 +52,12 @@ const CLAUDE_REAL = [
 ].join("\n");
 
 describe("reading what the CLI printed", () => {
+  it("reads the measured Muse login URL and code without a paste-code prompt", () => {
+    expect(parseDeviceLoginPrompt(
+      "Open this page to sign in:  https://auth.meta.com/oauth/device/?code=FLVM-CRRJ\n"
+      + "confirm this code matches:  FLVM-CRRJ\nWaiting for approval…",
+    )).toEqual({ url: "https://auth.meta.com/oauth/device/?code=FLVM-CRRJ", code: "FLVM-CRRJ" });
+  });
   it("finds the URL and code in real grok output", () => {
     expect(parseDeviceLoginPrompt(GROK_REAL)).toEqual({
       url: "https://accounts.x.ai/oauth2/device?user_code=SDCN-9XZS",
@@ -117,6 +123,10 @@ describe("reading what the CLI printed", () => {
 });
 
 describe("which providers have a headless flow", () => {
+  it("uses Muse's login subcommand, which skips workspace trust and polls on pipes", () => {
+    expect(deviceLoginPlan("muse")).toEqual({ args: ["login"] });
+    expect(deviceLoginPlan("muse")?.needsCode).toBeUndefined();
+  });
   it("offers one for grok and codex", () => {
     expect(deviceLoginPlan("grok")).toEqual({ args: ["login", "--device-auth"] });
     expect(deviceLoginPlan("codex")).toEqual({ args: ["login", "--device-auth"] });
