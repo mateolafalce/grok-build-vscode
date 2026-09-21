@@ -114,5 +114,7 @@ it.each([false, true])("shows only the advertised disabled host row in Settings 
   surface.update(api.defaultSnapshot({ providers: [{ id: "muse", connected: false }] }), env);
   expect(root.textContent).not.toContain(reason);
   expect(root.textContent).toContain("Muse Code");
-  expect(root.querySelector<HTMLButtonElement>('[data-provider="muse"].settings-provider-recheck')?.disabled).toBe(false);
+  const live = root.querySelector('[data-id="providerMuse"], [data-id="providerMuseRemote"]')!;
+  expect(live.querySelectorAll("button")).toHaveLength(1);
+  expect(live.querySelector<HTMLButtonElement>(".settings-action")?.disabled).toBe(false);
 });

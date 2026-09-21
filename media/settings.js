@@ -3134,12 +3134,6 @@
       const githubStepped = isGithub && (
         !!githubCliStarted || githubCliLive(snapshot) || !!(githubTokenForm && githubTokenForm.open)
       );
-      if (row.provider === "muse" && !providerOf(snapshot, "muse").unavailableReason) {
-        const check = document.createElement("button");
-        check.type = "button"; check.className = "settings-action settings-provider-recheck";
-        check.dataset.provider = "muse"; check.textContent = "Check again";
-        control.appendChild(check);
-      }
       const terminalStarted = !!(row.provider && PROVIDER_TERMINAL.id === row.provider
         && !(env && env.isRemote));
       if (terminalStarted) {

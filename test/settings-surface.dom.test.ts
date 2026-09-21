@@ -2168,15 +2168,15 @@ describe("Muse settings parity", () => {
     const h = mountAt("providers", { env, snapshot: { providers: [{ id: "muse", connected: false }] } });
     const row = h.root.querySelector(museRow)!;
     expect(row.getAttribute("data-id")).toBe(env.isRemote ? "providerMuseRemote" : "providerMuse");
-    const check = row.querySelector<HTMLButtonElement>(".settings-provider-recheck")!;
-    expect(check).not.toBeNull();
-    check.click();
-    expect(h.posted).toContainEqual({ type: "recheckConnection", provider: "muse" });
-    expect(h.posted.some(m => m.type === "runGrokLogin" || m.type === "logout")).toBe(false);
-    const connect = row.querySelector<HTMLButtonElement>(".settings-action:not(.settings-provider-recheck)");
+    // One action, the same as the other three. Muse used to carry a second
+    // "Check again" button nobody else had -- a leftover from when signing in
+    // happened in a terminal we could not see and the row had to ask.
+    expect(row.querySelectorAll("button")).toHaveLength(1);
+    const connect = row.querySelector<HTMLButtonElement>(".settings-action");
     expect(connect?.textContent).toBe("Connect");
     connect!.click();
     expect(h.posted).toContainEqual({ type: "runGrokLogin", provider: "muse" });
+    expect(h.posted.some(msg => msg.type === "recheckConnection")).toBe(false);
   });
 
   it.each(surfaces)("says whether the account is connected on $name", ({ env }) => {
@@ -2257,17 +2257,6 @@ describe("Muse settings parity", () => {
     }
   });
 
-  it("spaces both buttons at the control container, including in the standalone settings tab", () => {
-    const h = mountAt("providers", { snapshot: { providers: [{ id: "muse", connected: false }] } });
-    const style = h.window.document.createElement("style");
-    style.textContent = readFileSync(fileURLToPath(new URL("../media/settings.css", import.meta.url)), "utf8");
-    h.window.document.head.appendChild(style);
-    const controls = h.root.querySelector('[data-id="providerMuse"] .settings-row-control')!;
-    expect(controls.querySelectorAll("button")).toHaveLength(2);
-    const css = h.window.getComputedStyle(controls as never);
-    expect(css.display).toBe("flex");
-    expect(css.gap).toBe("8px");
-  });
 });
 
 describe("CLI update actions", () => {
