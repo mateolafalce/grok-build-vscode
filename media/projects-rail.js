@@ -437,12 +437,12 @@
   };
 
   function makeProviderGlyph(provider, dot, sessionId) {
-    const id = provider === "codex" || provider === "claude" ? provider : "grok";
+    const id = provider === "codex" || provider === "claude" || provider === "muse" && state.museAdvertised ? provider : "grok";
     const glyph = document.createElement("span");
     glyph.className = "provider-glyph provider-" + id;
-    glyph.title = id === "codex" ? "Codex" : id === "claude" ? "Claude" : "Grok";
+    glyph.title = id === "codex" ? "Codex" : id === "claude" ? "Claude" : id === "muse" ? "Muse Code" : "Grok";
     glyph.setAttribute("aria-label", glyph.title);
-    glyph.innerHTML = `<svg class="provider-logo" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="${PROVIDER_LOGO_PATHS[id]}"></path></svg>`;
+    glyph.innerHTML = id === "muse" ? '<span aria-hidden="true">M</span>' : `<svg class="provider-logo" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="${PROVIDER_LOGO_PATHS[id]}"></path></svg>`;
     const badge = document.createElement("span");
     badge.className = "provider-status-badge";
     badge.setAttribute("data-session-dot", sessionId);
@@ -1862,6 +1862,7 @@
     if (!msg || typeof msg !== "object") return;
     switch (msg.type) {
       case "providerState":
+        state.museAdvertised = Array.isArray(msg.providers) && msg.providers.some(p => p && p.id === "muse");
         state.showProviderGlyphs = Array.isArray(msg.providers) && msg.providers.filter((provider) => provider && provider.connected).length > 1;
         render();
         break;

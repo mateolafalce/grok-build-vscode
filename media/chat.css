@@ -6502,3 +6502,6 @@ body.host-wait-visible .gfp-panel.gfp-overlay { bottom: var(--host-wait-height, 
   .repo-icon-tab { min-height: 32px; }
   .repo-icon-grid { grid-template-columns: repeat(auto-fill, minmax(40px, 1fr)); }
 }
+
+.model-picker-row:has(.model-picker-description) { flex-wrap: wrap; }
+.model-picker-description { flex-basis: 100%; white-space: normal; text-align: left; font-size: 12px; line-height: 1.4; color: var(--muted); }

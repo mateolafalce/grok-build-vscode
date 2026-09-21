@@ -257,6 +257,24 @@ describe("multi-provider review regressions", () => {
     expect(methodBody("private async listAdapterHistory(")).toContain("client.listSessions(cwd, process.platform)");
   });
 
+  it("gives every provider the same teardown budget, and bounds the muse child wait", () => {
+    // One provider waiting longer than the others buys nothing: the ceiling is
+    // only reached by a process that will not exit, and then it is the user's
+    // app-quit that hangs. Muse's slow half is its `muse serve` child, so the
+    // wait is bounded inside the adapter that knows about it — not paid for by
+    // every teardown out here.
+    const acp = fs.readFileSync(path.join(root, "src", "acp.ts"), "utf8").replace(/\r\n/g, "\n");
+    expect(acp).toContain("dispose(timeoutMs = 3000): Promise<void> {");
+    expect(acp).not.toMatch(/dispose\(timeoutMs = this\.provider/);
+
+    const session = fs.readFileSync(path.join(root, "adapters", "muse", "session.mts"), "utf8").replace(/\r\n/g, "\n");
+    expect(session).toContain("Promise.race([handshake.exited, childExitTimeout()])");
+    // And the host's own ceiling must stay the outer bound of the adapter's.
+    expect(session).toMatch(/CHILD_EXIT_BUDGET_MS = (\d+)/);
+    const budget = Number(/CHILD_EXIT_BUDGET_MS = (\d+)/.exec(session)![1]);
+    expect(budget).toBeLessThan(3000);
+  });
+
   it("puts minimal provider state in every remote client snapshot", () => {
     const instance = Object.create(GrokSidebar.prototype) as any;
     instance.providerConnections = vi.fn(() => ({ grok: true, codex: true }));
@@ -264,6 +282,8 @@ describe("multi-provider review regressions", () => {
     expect(instance.providerStateMessage()).toEqual({
       type: "providerState",
       providers: [
+        { id: "muse", connected: false,
+          ...(process.platform === "win32" ? { unavailableReason: "Muse Code is unavailable on this host: Meta does not provide a native Windows CLI" } : {}) },
         { id: "grok", connected: true },
         { id: "codex", connected: false },
         { id: "claude", connected: false },

@@ -1,16 +1,41 @@
 import type { EffortLevel, PromptContentBlock } from "./acp";
 
 export const ACP_PROVIDERS = ["grok", "codex", "claude"] as const;
-export type AcpProvider = (typeof ACP_PROVIDERS)[number];
+// The legacy wire vocabulary above stays frozen for older receivers.
+export const INTERNAL_PROVIDERS = [...ACP_PROVIDERS, "muse"] as const;
+export type LegacyAcpProvider = (typeof ACP_PROVIDERS)[number];
+export type AcpProvider = (typeof INTERNAL_PROVIDERS)[number];
 
-export function isAcpProvider(value: unknown): value is AcpProvider {
+export function isInternalProvider(value: unknown): value is AcpProvider {
+  return isAcpProvider(value) || value === "muse";
+}
+
+export function supportsSessionDeletion(provider: AcpProvider): boolean {
+  return provider === "codex" || provider === "claude";
+}
+
+export function supportsModeSwitching(provider: AcpProvider): boolean {
+  return provider !== "muse";
+}
+
+export function usesPerCallContextOccupancy(provider: AcpProvider): boolean {
+  return provider === "codex" || provider === "claude";
+}
+
+export function supportsClientMcpServers(provider: AcpProvider): boolean {
+  return provider !== "muse";
+}
+
+export function isAcpProvider(value: unknown): value is LegacyAcpProvider {
   return value === "grok" || value === "codex" || value === "claude";
 }
 
 /** Providers whose conversations live in an adapter catalog, not ~/.grok. */
-export function isAdapterProvider(provider: AcpProvider): boolean {
-  return provider === "codex" || provider === "claude";
+export function usesAdapterHistory(provider: AcpProvider): boolean {
+  return provider === "codex" || provider === "claude" || provider === "muse";
 }
+
+export const isAdapterProvider = usesAdapterHistory;
 
 export interface BackendSpawnOptions {
   cliPath: string;
@@ -37,6 +62,8 @@ export interface BackendUpdate {
   meta?: any;
   sessionTitle?: string;
   contextWindow?: number;
+  /** Direct occupancy reported by a backend, including an empty context. */
+  contextUsed?: number;
   /**
    * Ordinary `usage_update.used` is billed per model call (includes output).
    * Compact's getContextUsage is the exception — the host only adopts this
@@ -51,6 +78,10 @@ export interface BackendSessionListEntry {
   cwd: string;
   title?: string;
   updatedAt?: string | number;
+  createdAt?: string | number;
+  turnCount?: number;
+  modelId?: string;
+  branch?: string;
 }
 
 export interface BackendSessionListResult {
@@ -68,8 +99,8 @@ export interface BackendSteeringOptions {
   grokVersionVerified?: boolean;
 }
 
-export interface AcpBackend {
-  readonly provider: AcpProvider;
+export interface AcpBackend<Provider extends string = AcpProvider> {
+  readonly provider: Provider;
   readonly processName: string;
   readonly usesClientPlanGate: boolean;
   spawn(options: BackendSpawnOptions): BackendSpawnSpec;

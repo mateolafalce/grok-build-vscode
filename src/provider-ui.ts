@@ -1,14 +1,15 @@
 import type { ModelInfo } from "./acp";
 import type { AcpProvider, BackendSessionListEntry } from "./acp-backend";
-import { isAdapterProvider } from "./acp-backend";
+import { INTERNAL_PROVIDERS, usesAdapterHistory } from "./acp-backend";
 import { normalizeWorkspaceFsPath } from "./host";
 import type { SessionListEntry, SessionMetaOverrides } from "./sessions";
 
-export const PROVIDER_ORDER: readonly AcpProvider[] = ["grok", "codex", "claude"];
+export const PROVIDER_ORDER: readonly AcpProvider[] = INTERNAL_PROVIDERS;
 
 export function providerDisplayName(provider: AcpProvider): string {
   if (provider === "codex") return "Codex";
   if (provider === "claude") return "Claude";
+  if (provider === "muse") return "Muse Code";
   return "Grok";
 }
 
@@ -16,6 +17,7 @@ export interface ProviderConnections {
   grok?: boolean;
   codex?: boolean;
   claude?: boolean;
+  muse?: boolean;
 }
 
 export interface ProviderModelCacheEntry {
@@ -110,15 +112,17 @@ export function usableProviderIds(
   return connectedProviderIds(connections, located).filter((provider) => needsLogin[provider] !== true);
 }
 
-export function providerLoginState(provider: AcpProvider): "auth-required" | "codex-login" | "claude-login" {
+export function providerLoginState(provider: AcpProvider): "auth-required" | "codex-login" | "claude-login" | "muse-login" {
   if (provider === "codex") return "codex-login";
   if (provider === "claude") return "claude-login";
+  if (provider === "muse") return "muse-login";
   return "auth-required";
 }
 
-export function missingProviderState(provider: AcpProvider): "missing-cli" | "missing-codex" | "missing-claude" {
+export function missingProviderState(provider: AcpProvider): "missing-cli" | "missing-codex" | "missing-claude" | "missing-muse" {
   if (provider === "codex") return "missing-codex";
   if (provider === "claude") return "missing-claude";
+  if (provider === "muse") return "missing-muse";
   return "missing-cli";
 }
 
@@ -130,7 +134,7 @@ export function findCachedAdapterSession(
 ): SessionListEntry | undefined {
   for (const entries of catalogs) {
     const found = entries.find((entry) =>
-      !!entry.provider && isAdapterProvider(entry.provider) && entry.id === id && belongsToAllowedCwd(entry.cwd, allowedCwds)
+      !!entry.provider && usesAdapterHistory(entry.provider) && entry.id === id && belongsToAllowedCwd(entry.cwd, allowedCwds)
     );
     if (found) return found;
   }
@@ -229,8 +233,10 @@ export function adapterListEntry(
     rawSummary: title,
     customName,
     updatedAt,
-    createdAt: updatedAt,
-    numMessages: 0,
+    createdAt: raw.createdAt === undefined ? updatedAt : (typeof raw.createdAt === "number" ? raw.createdAt : Date.parse(raw.createdAt)) || updatedAt,
+    numMessages: raw.turnCount ?? 0,
+    ...(raw.modelId ? { modelId: raw.modelId } : {}),
+    ...(raw.branch ? { branch: raw.branch } : {}),
     provider,
     pinnedAt: meta?.pinnedAt,
   };

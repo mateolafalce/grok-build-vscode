@@ -78,6 +78,7 @@
   };
 
   function providerLogoMarkup(id) {
+    if (id === "muse") return '<span aria-hidden="true">M</span>';
     const path = PROVIDER_LOGO_PATHS[id];
     if (!path) return "";
     return `<svg class="provider-logo" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="${path}"></path></svg>`;
@@ -840,6 +841,16 @@
           ? { type: "logout", provider: "codex" }
           : { type: "runGrokLogin", provider: "codex" };
       },
+    },
+    {
+      id: "providerMuse", category: "providers", logo: "muse", provider: "muse",
+      title: "Muse Code", vendor: "Meta", description: "", kind: "action", keepOpen: true,
+      visible: (s) => !!(s.providers || []).find(p => p.id === "muse"),
+      enabled: (s) => !providerOf(s, "muse").unavailableReason,
+      describe: (s) => providerOf(s, "muse").unavailableReason
+        || "Run muse on the execution host and use /login, then select Check again.",
+      actionLabel: (s) => providerOf(s, "muse").connected ? "Sign out" : "Connect",
+      message: (s) => ({ type: providerOf(s, "muse").connected ? "logout" : "runGrokLogin", provider: "muse" }),
     },
     {
       id: "providerClaude",
@@ -2281,7 +2292,7 @@
   }
   const NEW_ROUTINE = "__new__";
 
-  const PROVIDER_LABELS = { grok: "Grok", codex: "Codex", claude: "Claude" };
+  const PROVIDER_LABELS = { grok: "Grok", codex: "Codex", claude: "Claude", muse: "Muse Code" };
   function providerLabel(provider) {
     return PROVIDER_LABELS[provider] || provider;
   }
@@ -2304,7 +2315,7 @@
 
   function blankRoutineDraft(snapshot) {
     const projects = Array.isArray(snapshot.routineProjects) ? snapshot.routineProjects : [];
-    const models = Array.isArray(snapshot.routineModels) ? snapshot.routineModels : [];
+    const models = (Array.isArray(snapshot.routineModels) ? snapshot.routineModels : []).filter(m => m.provider !== "muse" || (snapshot.providers || []).some(p => p.id === "muse" && !p.unavailableReason));
     const project = projects[0];
     const pick = defaultModelFor(models, project && project.defaultProvider);
     return {
@@ -2484,7 +2495,7 @@
     }
     pair.appendChild(labelledField("Project", project));
 
-    const models = Array.isArray(snapshot.routineModels) ? snapshot.routineModels : [];
+    const models = (Array.isArray(snapshot.routineModels) ? snapshot.routineModels : []).filter(m => m.provider !== "muse" || (snapshot.providers || []).some(p => p.id === "muse" && !p.unavailableReason));
     const model = document.createElement("select");
     model.className = "settings-routine-input";
     model.dataset.field = "model";
@@ -3082,6 +3093,12 @@
       const githubStepped = isGithub && (
         !!githubCliStarted || githubCliLive(snapshot) || !!(githubTokenForm && githubTokenForm.open)
       );
+      if (row.provider === "muse" && !providerOf(snapshot, "muse").unavailableReason) {
+        const check = document.createElement("button");
+        check.type = "button"; check.className = "settings-action settings-provider-recheck";
+        check.dataset.provider = "muse"; check.textContent = "Check again";
+        control.appendChild(check);
+      }
       const terminalStarted = !!(row.provider && PROVIDER_TERMINAL.id === row.provider
         && !(env && env.isRemote));
       if (terminalStarted) {
@@ -3158,7 +3175,12 @@
     let routinesChecked = false;
     let lastPaintedCategory = "";
     let lastPaintedQuery = "";
-    const post = typeof opts.post === "function" ? opts.post : () => {};
+    const post = message => {
+      const mentionsMuse = value => value && typeof value === "object" && Object.entries(value).some(([key, child]) =>
+        key === "provider" && child === "muse" || mentionsMuse(child));
+      if (mentionsMuse(message) && !(snapshot.providers || []).some(p => p.id === "muse" && !p.unavailableReason)) return;
+      if (typeof opts.post === "function") opts.post(message);
+    };
     const apply = typeof opts.apply === "function" ? opts.apply : null;
     const onLocal = typeof opts.onLocal === "function" ? opts.onLocal : null;
     const onClose = typeof opts.onClose === "function" ? opts.onClose : null;
@@ -3971,7 +3993,7 @@
           // previous project's model across is rarely what was meant.
           if (input.dataset.field === "cwd" && ROUTINE_UI.draft) {
             const projects = Array.isArray(snapshot.routineProjects) ? snapshot.routineProjects : [];
-            const models = Array.isArray(snapshot.routineModels) ? snapshot.routineModels : [];
+            const models = (Array.isArray(snapshot.routineModels) ? snapshot.routineModels : []).filter(m => m.provider !== "muse" || (snapshot.providers || []).some(p => p.id === "muse" && !p.unavailableReason));
             const project = projects.find((x) => x.cwd === ROUTINE_UI.draft.cwd);
             const pick = defaultModelFor(models, project && project.defaultProvider);
             if (pick) {

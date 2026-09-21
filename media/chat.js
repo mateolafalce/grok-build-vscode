@@ -1,5 +1,18 @@
 (function () {
-  const vscode = acquireVsCodeApi();
+  const hostApi = acquireVsCodeApi();
+  let museAdvertised = false;
+  let museAvailable = false;
+  function namesMuse(value) {
+    if (!value || typeof value !== "object") return false;
+    return Object.entries(value).some(([key, child]) =>
+      key === "provider" && child === "muse" || child && typeof child === "object" && namesMuse(child));
+  }
+  const vscode = { getState: () => hostApi.getState(), setState: value => hostApi.setState(value),
+    postMessage: message => {
+      if (namesMuse(message) && !museAvailable) return false;
+      return hostApi.postMessage(message);
+    } };
+  function offeredProviders() { return ["grok", "codex", "claude", ...(museAvailable ? ["muse"] : [])]; }
   const hostWait = window.GrokHostWait.get();
   const pendingPreferences = new Map();
   let sendWait = null;
@@ -1363,6 +1376,7 @@
   }
 
   function updateModeBtn(modeId) {
+    modeBtn.hidden = state.activeProvider === "muse";
     const meta = MODE_META[modeId] || MODE_META.agent;
     modeBtn.innerHTML = `${meta.icon}<span class="btn-label">${escapeHtml(meta.label)}</span>`;
     modeBtn.classList.toggle("plan-active", modeId === "plan");
@@ -3964,10 +3978,10 @@
     // A signed-out agent has no knowable model list, and the placeholder shown
     // in its place ("Codex default") reads as something you can select — so its
     // rows are replaced by the one action that can actually help.
-    const signInProviders = ["grok", "codex", "claude"].filter(providerNeedsLogin);
-    models = models.filter((model) => !signInProviders.includes(model.provider || state.activeProvider));
+    const signInProviders = offeredProviders().filter(providerNeedsLogin);
+    models = models.filter((model) => ((model.provider || state.activeProvider) !== "muse" || museAvailable) && !signInProviders.includes(model.provider || state.activeProvider));
     if (grouped) {
-      models = ["grok", "codex", "claude"].flatMap((provider) => models.filter((model) =>
+      models = offeredProviders().flatMap((provider) => models.filter((model) =>
         (model.provider || state.activeProvider) === provider));
     }
     let group = "";
@@ -4001,7 +4015,13 @@
           `<span class="model-picker-name">${escapeHtml(truncate(label, 28))}</span>` +
         `</span>` +
         (active ? '<span class="popover-check">✓</span>' : "");
-      el.title = m.modelId;
+      el.title = m.description || m.modelId;
+      if (modelProvider === "muse" && m.description) {
+        const description = document.createElement("span");
+        description.className = "model-picker-description";
+        description.textContent = m.description;
+        el.appendChild(description);
+      }
       el.disabled = modelSelectionLocked();
       el.setAttribute("role", "radio");
       el.setAttribute("aria-checked", String(active));
@@ -4038,7 +4058,7 @@
       }
     };
     if (grouped) {
-      for (const provider of ["grok", "codex", "claude"]) {
+      for (const provider of offeredProviders()) {
         for (const m of models) {
           if ((m.provider || state.activeProvider) === provider) renderModelRow(m);
         }
@@ -4633,6 +4653,7 @@
   }
 
   function renderEffortStrip() {
+    if (state.activeProvider === "muse") return;
     const box = document.createElement("div");
     box.className = "model-effort-strip";
     const levels = currentModel() ? effortLevelsForModel() : [];
@@ -4755,6 +4776,7 @@
   }
 
   function openModePopover() {
+    if (state.activeProvider === "muse") return;
     if (!modePopover.hidden) { closePopovers(); return; }
     closePopovers();
     modePopover.innerHTML = "";
@@ -4878,7 +4900,7 @@
    * nobody is at the screen to read it. Same shape as steerableProvider().
    */
   function rewindCapableProvider() {
-    if (state.activeProvider === "claude" || state.activeProvider === "codex") return false;
+    if (state.activeProvider !== "grok") return false;
     // A host older than 4.1.0 classifies rewindSession / editLastMessage as
     // host-local and drops them without a reply, so the buttons would be dead
     // for every remote user who has not updated — and the relay always ships
@@ -4890,15 +4912,17 @@
   function providerDisplayName(provider) {
     if (provider === "codex") return "Codex";
     if (provider === "claude") return "Claude";
+    if (provider === "muse") return "Muse Code";
     return "Grok";
   }
 
   function providerLogoId(provider) {
-    if (provider === "codex" || provider === "claude") return provider;
+    if (provider === "codex" || provider === "claude" || provider === "muse") return provider;
     return "grok";
   }
 
   function providerLogoMarkup(provider) {
+    if (provider === "muse") return '<span aria-hidden="true">M</span>';
     const id = providerLogoId(provider);
     return `<svg class="provider-logo" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="${PROVIDER_LOGO_PATHS[id]}"></path></svg>`;
   }
@@ -5546,7 +5570,7 @@
       // make the delete "not stick" — and then starts a fresh conversation in
       // the same project. Against a host that cannot, the button stays away
       // rather than posting a message that comes back refused.
-      if (!active || canDeleteActiveSession()) {
+      if (s.provider !== "muse" && (!active || canDeleteActiveSession())) {
       const delBtn = document.createElement("button");
       delBtn.className = "history-action-btn history-action-danger";
       delBtn.innerHTML = ICON.trash;
@@ -8654,7 +8678,7 @@
     // stays visibly disabled and says why — the menu keeps its shape, and the
     // reason is the truth rather than "the open session can't be deleted".
     const activeUndeletable = !!active && !canDeleteActiveSession();
-    items.push(null, {
+    if (s.provider !== "muse") items.push(null, {
       label: "Delete",
       icon: ICON.trash,
       danger: true,
@@ -8958,7 +8982,7 @@
     const host = state.welcomeTips || {};
     const providers = state.providers || [];
     const altConnected = providers.some(
-      (p) => p && (p.id === "codex" || p.id === "claude") && p.connected,
+      (p) => p && (p.id === "codex" || p.id === "claude" || p.id === "muse" && museAdvertised) && p.connected,
     );
     return {
       appPurpose: state.appPurpose === "coding" ? "coding" : "knowledge",
@@ -10064,7 +10088,7 @@
     // The products' own names, everywhere this panel speaks. Not "Grok": that
     // is the model, the extension is Grok Build, and a heading that disagrees
     // with the button beneath it reads as two different things to connect.
-    const NAMES = { grok: "Grok Build", codex: "Codex", claude: "Claude Code" };
+    const NAMES = { grok: "Grok Build", codex: "Codex", claude: "Claude Code", muse: "Muse Code" };
     const name = NAMES[provider] || "an agent";
     const status = (text) => { if (ver) setWelcomeStatus(text, false); };
 
@@ -10221,7 +10245,7 @@
     // frame's provider is the specific thing being asked for again.
     const nothingConnected = !((state.providers || []).some((p) => p && p.connected));
     const cloudFresh = !!(state.hostCaps && state.hostCaps.remoteAgentSignOut) && nothingConnected;
-    const offer = provider && !cloudFresh ? [provider] : ["grok", "codex", "claude"];
+    const offer = (provider && !cloudFresh ? [provider] : offeredProviders()).filter(id => id !== "muse" || museAvailable);
     // A cloud machine's three agents are not equal offers: Grok is the native
     // one. Ranking is the cloud-only part; every agent that has a headless
     // flow is offered, including Claude Code's paste-code sign-in.
@@ -10231,7 +10255,7 @@
         const rec = cloudHost && id === "grok" ? " (recommended)" : "";
         // The mark the reader already knows from the model picker and the
         // provider rows. currentColor, so it takes the button's foreground.
-        return `<button class="onb-action" type="button" data-act="connectRemote" data-provider="${id}">`
+        return `<button class="onb-action" type="button" data-act="${id === "muse" ? "connectProvider" : "connectRemote"}" data-provider="${id}">`
           + providerLogoMarkup(id)
           + `<span>Connect ${NAMES[id]}${rec}</span></button>`;
       })
@@ -10394,6 +10418,7 @@
     "connect-agent": true,
     "codex-login": true,
     "claude-login": true,
+    "muse-login": true,
     "auth-required": true,
   };
 
@@ -10421,6 +10446,7 @@
 
   function showOnboarding(mode, info, beforeRender) {
     info = info || {};
+    if ((info.provider === "muse" || mode === "muse-login" || mode === "missing-muse") && !museAdvertised) return;
     state.onboardingMode = mode;
     state.onboardingInfo = info;
     if (beforeRender) beforeRender();
@@ -10459,6 +10485,17 @@
       onb.innerHTML = remoteConnectPanel(mode, forCard, ver);
       return;
     }
+    if ((mode === "muse-login" || mode === "missing-muse") && museAdvertised) {
+      const provider = (state.providers || []).find(p => p.id === "muse");
+      const reason = provider && provider.unavailableReason;
+      onb.innerHTML = `<div class="onb"><p class="onb-heading">Muse Code</p>`
+        + `<p class="onb-desc">${escapeHtml(reason || (mode === "missing-muse"
+          ? "Install Meta's Muse Code CLI on the execution host, then re-check."
+          : "Run muse in a terminal on the execution host and use /login, then re-check."))}</p>`
+        + (reason ? "" : `${!IS_REMOTE && mode !== "missing-muse" ? '<button class="onb-action" data-act="connectProvider" data-provider="muse">Open Muse sign-in</button>' : ''}<button class="onb-action" data-act="recheckProvider" data-provider="muse">Re-check</button>`)
+        + `</div>`;
+      return;
+    }
     if (mode === "no-project") {
       // Desktop with nothing open. Names the block and points at the same
       // action the rail already offers — do not leave the baked Starting
@@ -10491,7 +10528,7 @@
       const id = info.provider || "grok";
       const done = id === "codex"
         ? "You can start working with OpenAI!"
-        : id === "claude" ? "You can start clauding!" : "You can start grokking!";
+        : id === "claude" ? "You can start clauding!" : id === "muse" ? "Muse Code is connected." : "You can start grokking!";
       if (ver) setWelcomeStatus("Connected", false);
       onb.innerHTML =
         `<div class="onb onb-connected">` +
@@ -10523,6 +10560,7 @@
             `<button class="onb-agent-tile onb-action" type="button" data-act="connectProvider" data-provider="claude">` +
               `<span class="onb-agent-mark">${providerLogoMarkup("claude")}</span><span><strong>Claude Code</strong><small>Claude Code CLI</small></span>` +
             `</button>` +
+            (museAvailable ? `<button class="onb-agent-tile onb-action" type="button" data-act="connectProvider" data-provider="muse"><span class="onb-agent-mark">M</span><span><strong>Muse Code</strong><small>Meta Muse CLI</small></span></button>` : "") +
           `</div>` +
         `</div>`;
     } else if (mode === "missing-cli") {
@@ -11291,7 +11329,7 @@
   }
 
   function feedbackOffered() {
-    return state.feedbackAvailable === true && state.activeProvider !== "codex" && state.activeProvider !== "claude";
+    return state.feedbackAvailable === true && state.activeProvider === "grok";
   }
 
   function stripTurnThumbs(actions) {
@@ -14705,12 +14743,14 @@
   function activityVerb() {
     if (state.activeProvider === "codex") return CODEX_ACTIVITY_VERB;
     if (state.activeProvider === "claude") return CLAUDE_ACTIVITY_VERB;
+    if (state.activeProvider === "muse") return "Working";
     return GROK_ACTIVITY_VERB;
   }
 
   function activityAriaLabel() {
     if (state.activeProvider === "codex") return "OpenAI is working";
     if (state.activeProvider === "claude") return "Claude is working";
+    if (state.activeProvider === "muse") return "Muse Code is working";
     return "Grok is working";
   }
 
@@ -18296,9 +18336,11 @@
         renderWelcomeTip();
         break;
       case "providerState":
+        museAdvertised = Array.isArray(msg.providers) && msg.providers.some(p => p && p.id === "muse");
+        museAvailable = museAdvertised && msg.providers.some(p => p && p.id === "muse" && !p.unavailableReason);
         state.providersKnown = true;
         state.providers = Array.isArray(msg.providers) ? msg.providers.filter((provider) =>
-          provider && (provider.id === "grok" || provider.id === "codex" || provider.id === "claude")) : [];
+          provider && (provider.id === "grok" || provider.id === "codex" || provider.id === "claude" || provider.id === "muse")) : [];
         // A confirmed account retires its device-flow mirror. Without this the
         // "Connected" flow row would resurface in Settings after a later
         // sign-out, describing a connection that no longer exists.
@@ -18391,7 +18433,7 @@
         state.routineSavePending = false;
         state.routines = Array.isArray(msg.entries) ? msg.entries : [];
         state.routineProjects = Array.isArray(msg.projects) ? msg.projects : [];
-        state.routineModels = Array.isArray(msg.models) ? msg.models : [];
+        state.routineModels = (Array.isArray(msg.models) ? msg.models : []).filter(m => m.provider !== "muse" || museAvailable);
         state.routineError = msg.error || "";
         state.routineErrorId = msg.errorId || "";
         refreshSettingsOverlay();
@@ -18725,7 +18767,7 @@
       case "session": {
         state.subscriptionWindows = [];
         state.currentModelId = msg.currentModelId;
-        state.activeProvider = msg.provider === "codex" || msg.provider === "claude" ? msg.provider : "grok";
+        state.activeProvider = msg.provider === "codex" || msg.provider === "claude" || msg.provider === "muse" && museAvailable ? msg.provider : "grok";
         renderQueuedBlocks();
         syncFeedbackButtons();
         syncProviderVoice();
@@ -18736,7 +18778,7 @@
         renderCodexUpdateNudge();
         if (state.railTransition?.kind === "new") renderRail();
         state.isWorktree = !!msg.worktree; // gates the gear Apply/Remove worktree items
-        state.availableModels = msg.models || [];
+        state.availableModels = (msg.models || []).filter(m => (m.provider || msg.provider) !== "muse" || museAvailable);
         if (currentModel()?.reasoningEffort) state.effort = currentModel().reasoningEffort;
         refreshModelControls();
         renderProviderSignInCard();
