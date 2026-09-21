@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { INTERNAL_PROVIDERS, ACP_PROVIDERS, isInternalProvider, supportsCompaction, supportsHistoryDeletion, usesAdapterHistory } from "../src/acp-backend";
+import { INTERNAL_PROVIDERS, ACP_PROVIDERS, isInternalProvider, supportsClientMcpServers, supportsCompaction, supportsHistoryDeletion, supportsModeSwitching, usesAdapterHistory, usesPerCallContextOccupancy } from "../src/acp-backend";
 import { PROVIDER_ORDER, connectedProviderIds, providerDisplayName } from "../src/provider-ui";
 import { parseWebviewMsg } from "../src/desktop/webview-msg-validate";
 import { parseRelayFrame } from "../src/remote-frames";
@@ -86,6 +86,26 @@ describe("provider registration across surfaces", () => {
       expect(matchProviderSlashCommand(provider, "/compact", names)).toBe(supportsCompaction(provider) ? "compact" : null);
     }
     expect(matchSlashCommand("/compact", [])).toBe("compact");
+  });
+
+  // The host parks stub clients -- `{ dispose() {}, setHumanWaitActive() {} } as
+  // AcpClient` -- on sessions a remote tab owns, and a stub has no `provider`.
+  // `sessionDisplayName` asks a capability question about exactly those, so a
+  // table indexed bare threw where the released comparison had answered false,
+  // and took `selectRepo`/`resumeSession` down with it: 24 integration tests,
+  // one cause, a phone that could not join a conversation.
+  it("answers for a client that carries no provider instead of throwing", () => {
+    const absent = undefined as unknown as (typeof INTERNAL_PROVIDERS)[number];
+    expect(usesAdapterHistory(absent)).toBe(false);   // the released answer
+    expect(supportsHistoryDeletion(absent)).toBe(true);
+    expect(supportsCompaction(absent)).toBe(true);
+    expect(supportsModeSwitching(absent)).toBe(true);
+    expect(usesPerCallContextOccupancy(absent)).toBe(false);
+    expect(supportsClientMcpServers(absent)).toBe(true);
+    // Not a special case for `undefined`: anything off the table reads as the
+    // default provider, which is what the wire already does with one.
+    for (const answer of [usesAdapterHistory, supportsHistoryDeletion, supportsCompaction])
+      expect(answer("spark" as never)).toBe(answer("grok"));
   });
 
   it("names only deletable providers in the shared confirmation", () => {

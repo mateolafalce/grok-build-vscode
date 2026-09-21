@@ -13544,8 +13544,8 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
    * `session/list` returns an unscoped catalog that `codex-backend.ts` filters
    * locally, and a process spawned in one repo duly returned sessions for
    * eight others — while **claude takes `cwd` as a per-call parameter and
-   * honours it**: asked from a process spawned in `grok-remote` for a different
-   * checkout, it returned that checkout's 69 sessions and nothing else, with no
+   * honours it**: asked from a process spawned in one checkout for a different
+   * one, it returned that second checkout's 69 sessions and nothing else, with no
    * leakage in either direction. For both, the process's own spawn cwd is
    * irrelevant to the answer, so one process can serve every repo on the rail.
    *

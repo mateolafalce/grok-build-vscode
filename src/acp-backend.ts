@@ -25,12 +25,32 @@ const PROVIDER_ACTIONS: Record<AcpProvider, {
   muse: { deleteHistory: false, compact: false, adapterHistory: true, modeSwitching: false, perCallContext: false, clientMcp: false },
 };
 
+/**
+ * A provider's row, total on purpose.
+ *
+ * `session.client` is not always a live `AcpClient`. The host parks stubs --
+ * `{ dispose() {}, setHumanWaitActive() {} } as AcpClient` -- on sessions a
+ * remote tab owns, and a stub carries no `provider` at all. Until 4.10.0 the
+ * only capability question was `isAdapterProvider`, written as a comparison,
+ * so an absent provider answered `false` and `sessionDisplayName` fell through
+ * to its ordinary branch. Indexing this table turned the same call into
+ * "Cannot read properties of undefined", and because the name is posted from
+ * `postSessionsListNow` and `focusSession`, it took `selectRepo` and
+ * `resumeSession` down with it -- a phone could not join a conversation at all.
+ *
+ * Grok's row is the fallback because it is already what the rest of the wire
+ * does with a provider it does not recognise (`isAcpProvider(p) ? p : "grok"`).
+ */
+function actionsFor(provider: AcpProvider): (typeof PROVIDER_ACTIONS)[AcpProvider] {
+  return PROVIDER_ACTIONS[provider] ?? PROVIDER_ACTIONS.grok;
+}
+
 export function supportsHistoryDeletion(provider: AcpProvider): boolean {
-  return PROVIDER_ACTIONS[provider].deleteHistory;
+  return actionsFor(provider).deleteHistory;
 }
 
 export function supportsCompaction(provider: AcpProvider): boolean {
-  return PROVIDER_ACTIONS[provider].compact;
+  return actionsFor(provider).compact;
 }
 
 export function supportsSessionDeletion(provider: AcpProvider): boolean {
@@ -38,15 +58,15 @@ export function supportsSessionDeletion(provider: AcpProvider): boolean {
 }
 
 export function supportsModeSwitching(provider: AcpProvider): boolean {
-  return PROVIDER_ACTIONS[provider].modeSwitching;
+  return actionsFor(provider).modeSwitching;
 }
 
 export function usesPerCallContextOccupancy(provider: AcpProvider): boolean {
-  return PROVIDER_ACTIONS[provider].perCallContext;
+  return actionsFor(provider).perCallContext;
 }
 
 export function supportsClientMcpServers(provider: AcpProvider): boolean {
-  return PROVIDER_ACTIONS[provider].clientMcp;
+  return actionsFor(provider).clientMcp;
 }
 
 export function isAcpProvider(value: unknown): value is LegacyAcpProvider {
@@ -55,7 +75,7 @@ export function isAcpProvider(value: unknown): value is LegacyAcpProvider {
 
 /** Providers whose conversations live in an adapter catalog, not ~/.grok. */
 export function usesAdapterHistory(provider: AcpProvider): boolean {
-  return PROVIDER_ACTIONS[provider].adapterHistory;
+  return actionsFor(provider).adapterHistory;
 }
 
 export const isAdapterProvider = usesAdapterHistory;
