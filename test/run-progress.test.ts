@@ -234,7 +234,7 @@ describe("parseRunProgressUpdate — workflow", () => {
 
   it("never promotes a run id to a control handle", () => {
     const u = parseRunProgressUpdate({ sessionUpdate: "workflow_updated", run_id: "opaque-run-id" });
-    expect(u).toMatchObject({ id: "opaque-run-id", title: "opaque-run-id" });
+    expect(u).toMatchObject({ id: "opaque-run-id", title: "Workflow" });
     expect(u?.displayName).toBeUndefined();
     expect(workflowControlCommand("pause", u?.displayName)).toBeNull();
   });

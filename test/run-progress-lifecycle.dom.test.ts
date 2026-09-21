@@ -39,26 +39,26 @@ describe("the captured workflow lifecycle", () => {
     const h = replay();
     for (let i = 0; i <= 4; i++) {
       h.advance(4000); h.frame(i);
-      expect(text(h, ".workflow-motion")).toContain("activity unverified");
+      expect(h.doc.querySelector(".workflow-motion")).toBeNull();
       expect(text(h, ".workflow-agent-activity")).not.toMatch(/tokens moved|state changed/);
       expect(h.doc.querySelector(".workflow-card .blink-dots")).toBeNull();
     }
-    expect(text(h, ".workflow-pin .run-progress-phase")).toBe("· Plan, step 1 of 4 · user paused");
+    expect(text(h, ".workflow-pin .run-progress-phase")).toBe("· Plan · user paused");
     expect([...h.doc.querySelectorAll(".workflow-pin .run-progress-btn")].map((b) => b.textContent)).toEqual(["Resume", "Stop"]);
   });
   it("observes a cancelled state transition without portraying it as ongoing work", () => {
     const h = replay(); h.frame(4); h.frame(5);
     expect(text(h, ".workflow-agent-state")).toContain("reported cancelled");
-    expect(text(h, ".workflow-agent-activity")).toBe("state changed 0s ago");
+    expect(text(h, ".workflow-agent-activity")).toBe("state changed 0s ago \u00b7 no token activity observed");
     h.advance(12000); h.frame(5);
-    expect(text(h, ".workflow-agent-activity")).toBe("state changed 12s ago");
-    expect(text(h, ".workflow-motion")).toContain("0 reported running");
-    expect(text(h, ".workflow-receipt")).toBe("workflow update received 0s ago");
+    expect(text(h, ".workflow-agent-activity")).toBe("state changed 12s ago \u00b7 no token activity observed");
+    expect(h.doc.querySelector(".workflow-motion")).toBeNull();
+    expect(text(h, ".workflow-receipt")).toBe("updated 0s ago");
   });
   it("ends the pin on stop while retaining the reported duration and roster in the transcript", () => {
     const h = replay(); frames.forEach((_, i) => h.frame(i));
     expect(h.doc.querySelector(".workflow-pin")).toBeNull();
-    expect(text(h, ".workflow-card .run-progress-phase")).toBe("· Plan, step 1 of 4 · cancelled");
+    expect(text(h, ".workflow-card .run-progress-phase")).toBe("· Plan · cancelled");
     expect(text(h, ".workflow-card .run-progress-elapsed")).toBe("· 0:00");
     expect(text(h, ".workflow-agent-state")).toContain("reported cancelled");
     expect(h.doc.querySelector(".workflow-card")!.classList.contains("run-progress-cancelled")).toBe(true);

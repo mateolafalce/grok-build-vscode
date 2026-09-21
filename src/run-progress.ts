@@ -309,7 +309,7 @@ function parseWorkflow(u: Record<string, unknown>, sessionUpdate: string): RunPr
   const agentsUsed = num(u.agents_used ?? u.agentsUsed);
   const agentBudget = num(u.agent_budget ?? u.agentBudget);
   if (agentsUsed != null && agentBudget != null && agentBudget > 0) {
-    detailParts.push(`${agentsUsed} of ${agentBudget} agents used`);
+    detailParts.push(`${agentsUsed.toLocaleString("en-US")} of ${agentBudget.toLocaleString("en-US")} agents used`);
   }
 
   const done = DONE_PHASES.has(phase) || /completed|failed|cancelled|stopped/.test(sessionUpdate);
@@ -319,7 +319,7 @@ function parseWorkflow(u: Record<string, unknown>, sessionUpdate: string): RunPr
   return {
     kind: "workflow",
     id: runId,
-    title: displayName || runId,
+    title: displayName || "Workflow",
     subtitle: objective,
     phase,
     detail: detailParts.join(" · ") || undefined,
@@ -376,7 +376,7 @@ function parseGoal(u: Record<string, unknown>, sessionUpdate: string): RunProgre
   }
 
   const detailParts: string[] = [];
-  if (total != null && completed != null) detailParts.push(`${completed}/${total} deliverables`);
+  if (total != null && completed != null) detailParts.push(`${completed.toLocaleString("en-US")}/${total.toLocaleString("en-US")} deliverables`);
   if (curTitle) detailParts.push(curTitle);
 
   const done =

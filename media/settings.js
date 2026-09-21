@@ -2427,7 +2427,7 @@
     const count = document.createElement("span");
     count.className = "settings-routine-count";
     const health = routine.health || { ran: 0, total: 0 };
-    count.textContent = health.total ? health.ran + "/" + health.total : "no runs yet";
+    count.textContent = health.total ? health.ran.toLocaleString("en-US") + "/" + health.total.toLocaleString("en-US") : "no runs yet";
     const wrap = document.createElement("span");
     wrap.className = "settings-routine-strip-wrap";
     wrap.append(strip, count);
@@ -2604,7 +2604,7 @@
     const head = document.createElement("div");
     head.className = "settings-routine-runs-head";
     head.textContent = routine.runs.length
-      ? "Last " + routine.runs.length + (routine.runs.length === 1 ? " run" : " runs")
+      ? "Last " + routine.runs.length.toLocaleString("en-US") + (routine.runs.length === 1 ? " run" : " runs")
       : "No runs yet";
     wrap.appendChild(head);
     for (const run of routine.runs) {

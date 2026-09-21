@@ -1345,6 +1345,10 @@
     return (value < 0 ? "-" : "") + text + suffix;
   }
 
+  function formatCount(value) {
+    return value.toLocaleString("en-US");
+  }
+
   function truncate(s, max) {
     return s.length > max ? s.slice(0, max) + "…" : s;
   }
@@ -11619,12 +11623,12 @@
     }
     n.edit = editFiles.size;
     const parts = [];
-    if (n.explore) parts.push(`explored ${n.explore} item${n.explore === 1 ? "" : "s"}`);
-    if (n.edit) parts.push(`edited ${n.edit} file${n.edit === 1 ? "" : "s"}`);
-    if (n.delete) parts.push(`deleted ${n.delete} file${n.delete === 1 ? "" : "s"}`);
-    if (n.generate) parts.push(`generated ${n.generate} item${n.generate === 1 ? "" : "s"}`);
+    if (n.explore) parts.push(`explored ${formatCount(n.explore)} item${n.explore === 1 ? "" : "s"}`);
+    if (n.edit) parts.push(`edited ${formatCount(n.edit)} file${n.edit === 1 ? "" : "s"}`);
+    if (n.delete) parts.push(`deleted ${formatCount(n.delete)} file${n.delete === 1 ? "" : "s"}`);
+    if (n.generate) parts.push(`generated ${formatCount(n.generate)} item${n.generate === 1 ? "" : "s"}`);
     if (n.web) parts.push("searched web");
-    if (n.command) parts.push(`ran ${n.command} command${n.command === 1 ? "" : "s"}`);
+    if (n.command) parts.push(`ran ${formatCount(n.command)} command${n.command === 1 ? "" : "s"}`);
     return parts.length ? parts.join(", ").replace(/^./, (c) => c.toUpperCase()) : "Tool calls";
   }
 
@@ -11886,6 +11890,7 @@
     clearWelcome();
     hideGrokking(); // a tool card is the first content of this turn
     hideThinkingIndicator(); // a running tool now conveys the activity
+    if (addWorkflowToolMarker(call)) return;
     // Deletes never carry a type:"diff" block — catch kind:delete + shell
     // Remove-Item/rm here (and on restore's completed tool_call).
     maybeRecordTurnDelete(call);
@@ -12132,7 +12137,7 @@
     let viewAll = null;
     let expanded = false;
     let previewLabel = logicalPreview.truncated
-      ? `View all (${logicalPreview.lineCount} lines) →`
+      ? `View all (${formatCount(logicalPreview.lineCount)} lines) →`
       : "View all →";
     const ensureViewAll = () => {
       if (viewAll) {
@@ -12190,7 +12195,7 @@
       if (!expanded) pre.classList.add("command-preview-capped");
       const renderedTruncated = hasLayout && pre.scrollHeight > pre.clientHeight;
       const truncated = logicalTruncated || renderedTruncated;
-      previewLabel = truncated ? `View all (${logicalPreview.lineCount} lines) →` : "View all →";
+      previewLabel = truncated ? `View all (${formatCount(logicalPreview.lineCount)} lines) →` : "View all →";
       if (!expanded) {
         if (hasLayout && !truncated) pre.classList.remove("command-preview-capped");
         pre.classList.remove("command-full");
@@ -12320,6 +12325,7 @@
       merged.detailInput = update.detailInput;
     }
     item._call = merged;
+    if (item.classList.contains("workflow-tool-marker")) syncWorkflowToolMarkers();
     // Flatten / summarize read `_calls`, not `item._call`. Grok's first
     // use_tool row is titled "use_tool" until this update; leave the
     // group's copy stale and the flat label stays the wrapper name.
@@ -12737,10 +12743,10 @@
     sub.className = "tool-item-subtitle diff-stat";
     const a = document.createElement("span");
     a.className = "diff-stat-add";
-    a.textContent = `+${added}`;
+    a.textContent = `+${formatCount(added)}`;
     const d = document.createElement("span");
     d.className = "diff-stat-del";
-    d.textContent = `−${removed}`;
+    d.textContent = `−${formatCount(removed)}`;
     sub.appendChild(a);
     sub.appendChild(document.createTextNode(" "));
     sub.appendChild(d);
@@ -13713,12 +13719,37 @@
 
   let workflowPin = null;
   let workflowAgeTimer = null;
-  let workflowPinExpanded = false;
+
+  function addWorkflowToolMarker(call) {
+    if (!/^Workflow: [\w.:-]+$/.test(call?.title || "")) return false;
+    closeToolGroup();
+    flushAgent();
+    state.activeAgentEl = null;
+    state.activeAgentRaw = "";
+    const item = document.createElement("div");
+    item.className = "tool-flat workflow-tool-marker";
+    item.innerHTML = toolIconFor([call]);
+    applyToolLabel(workflowText(item, "tool-item-label", "", "span"), call);
+    item._call = call;
+    if (call.toolCallId) state.toolItemsByToolCallId.set(call.toolCallId, item);
+    appendTranscriptChild(item);
+    syncWorkflowToolMarkers();
+    return true;
+  }
+
+  function syncWorkflowToolMarkers() {
+    const records = [...state.runProgressCards.values()].map((el) => el._workflow).filter(Boolean);
+    for (const item of messagesEl.querySelectorAll(".workflow-tool-marker")) {
+      const call = item._call;
+      const name = /^Workflow: ([\w.:-]+)$/.exec(call.title || "")?.[1];
+      // The tool remains the fallback until a matching named run arrives.
+      item.hidden = !!name && !toolFailureText(call) && records.filter((r) => r.update.displayName === name).length === 1;
+    }
+  }
 
   function clearWorkflowPin() {
     if (workflowPin) workflowPin.remove();
     workflowPin = null;
-    workflowPinExpanded = false;
     clearInterval(workflowAgeTimer);
     workflowAgeTimer = null;
   }
@@ -13739,7 +13770,7 @@
     const useId = update.currentPhaseId || byId.length;
     const matches = useId ? byId : indexed.filter(({ p }) => update.currentPhase && p.title === update.currentPhase);
     const name = useId && matches.length === 1 ? matches[0].p.title : update.currentPhase;
-    return name ? name + (matches.length === 1 ? `, step ${matches[0].i + 1} of ${phases.length}` : "") : "";
+    return name || "";
   }
 
   function workflowElapsed(ms) {
@@ -13756,41 +13787,44 @@
   function workflowAgentActivity(record, agent) {
     const key = workflowAgentKey(agent, record.update.agents || []);
     const event = key && record.activity.get(key);
-    if (!event) return "no activity observed";
+    if (!event) return "no token activity observed";
     const seconds = Math.max(0, Math.floor((Date.now() - event.at) / 1000));
-    return `${event.kind} ${seconds}s ago`;
+    return `${event.kind} ${formatCount(seconds)}s ago${event.tokensObserved ? "" : " · no token activity observed"}`;
   }
 
   function workflowBlockages(update) {
     return (update.agents || []).filter((a) => /fail|error|permission|block|await.*approval|waiting.*approval/i.test(a.state || ""));
   }
 
-  function workflowMotion(record) {
-    const u = record.update;
-    const agents = Array.isArray(u.agents) ? u.agents : [];
-    const blocked = workflowBlockages(u);
-    const running = agents.filter((a) => /^(running|active)$/i.test(a.state || ""));
-    const count = Array.isArray(u.agents) ? running.length : u.activeAgents;
-    const routine = count == null ? "agent activity unavailable" : `${count} reported running`;
-    const headline = blocked.length ? blocked.map((a) => `${a.label}: ${String(a.state).replace(/[_-]+/g, " ")}`).join("; ") : routine;
-    const events = agents.map((a) => ({ agent: a, event: record.activity.get(workflowAgentKey(a, agents)) }))
-      .filter(({ event }) => event).sort((a, b) => b.event.at - a.event.at);
-    const observed = events.length ? `${events[0].agent.label}: ${workflowAgentActivity(record, events[0].agent)}` : "activity unverified";
-    // An observed event is a dated fact, never an assertion that work continues.
-    const unverified = events.length && running.some((a) => !record.activity.has(workflowAgentKey(a, agents)))
-      ? " · running activity unverified" : "";
-    return `${headline} · ${observed}${unverified}`;
+  /**
+   * One line naming agents that are NOT simply running, for the collapsed card.
+   *
+   * The roster lives behind the disclosure on purpose — a quiet card was the
+   * point, and a healthy run has nothing to say. A stuck one does. An agent
+   * sitting on a permission prompt still arrives inside frames, so the receipt
+   * above goes on reading "updated 3s ago" while nothing moves, and collapsed
+   * that is indistinguishable from work in progress. This is the one exception
+   * to keeping the roster hidden, and it is the smallest one available: a count
+   * and the state's own word, never the roster itself.
+   */
+  function workflowBlockageSummary(agents) {
+    const groups = new Map();
+    for (const agent of agents) {
+      const label = String(agent.state || "blocked").replace(/[_-]+/g, " ").trim() || "blocked";
+      groups.set(label, (groups.get(label) || 0) + 1);
+    }
+    return [...groups].map(([label, n]) => `${formatCount(n)} ${n === 1 ? "agent" : "agents"} ${label}`).join(" · ");
   }
 
   function refreshWorkflowAges() {
     for (const el of state.runProgressCards.values()) {
       const record = el._workflow;
       if (!record) continue;
-      for (const surface of [el, record.pin].filter(Boolean)) {
-        surface.querySelector(".workflow-motion").textContent = workflowMotion(record);
-        surface.querySelector(".workflow-receipt").textContent = record.receivedAt == null
+      for (const surface of [el, record.pin].filter((surface) => surface?.isConnected)) {
+        const receipt = surface.querySelector(".workflow-receipt");
+        if (receipt) receipt.textContent = record.receivedAt == null
           ? "historical workflow update"
-          : `workflow update received ${Math.max(0, Math.floor((Date.now() - record.receivedAt) / 1000))}s ago`;
+          : `updated ${formatCount(Math.max(0, Math.floor((Date.now() - record.receivedAt) / 1000)))}s ago`;
         for (const row of surface.querySelectorAll(".workflow-agent")) {
           const agent = record.update.agents[Number(row.dataset.agentIndex)];
           row.querySelector(".workflow-agent-activity").textContent = workflowAgentActivity(record, agent);
@@ -13802,59 +13836,115 @@
   function renderWorkflowSurface(el, record) {
     const u = record.update;
     if (!el.firstChild) {
-      el.innerHTML = `<div class="run-progress-row"><span class="run-progress-title"></span><span class="run-progress-phase"></span><span class="run-progress-elapsed" hidden></span></div>` +
-        `<div class="workflow-motion"></div><div class="workflow-receipt"></div><div class="run-progress-actions"></div>` +
-        `<ol class="workflow-phases" hidden></ol><div class="workflow-expanded"><div class="run-progress-sub" hidden></div><div class="run-progress-detail" hidden></div><div class="workflow-spend" hidden></div><ul class="workflow-roster" hidden></ul></div>`;
+      const headingTag = u.done ? "div" : "button";
+      el.innerHTML = `<div class="workflow-heading"><${headingTag} class="workflow-pin-toggle run-progress-row"><span class="run-progress-title"></span><span class="workflow-dots" hidden></span><span class="run-progress-phase"></span><span class="run-progress-elapsed" hidden></span><span class="workflow-chevron" aria-hidden="true"></span></${headingTag}><div class="run-progress-actions"></div></div>` +
+        `<div class="workflow-receipt"></div><div class="workflow-blocked" hidden></div><div class="workflow-expanded" hidden><ol class="workflow-phases" hidden></ol><div class="run-progress-sub" hidden></div><div class="run-progress-detail" hidden></div><div class="workflow-spend" hidden></div><ul class="workflow-roster" hidden></ul></div>`;
+      if (!u.done) el.querySelector(".workflow-pin-toggle").onclick = () => {
+        record.expanded = !record.expanded;
+        syncWorkflowPin();
+      };
     }
-    el.classList.toggle("run-progress-failed", !!u.failed);
-    el.classList.toggle("run-progress-cancelled", !!u.cancelled && !u.failed);
-    el.classList.toggle("run-progress-done", !!u.done);
+    el.classList.toggle("is-expanded", !!record.expanded);
+    const toggle = el.querySelector(".workflow-pin-toggle");
+    if (!u.done) {
+      toggle.type = "button";
+      toggle.setAttribute("aria-expanded", String(!!record.expanded));
+    }
+    el.querySelector(".workflow-expanded").hidden = !record.expanded;
     const title = el.querySelector(".run-progress-title");
-    title.textContent = u.title || u.id;
+    title.textContent = u.title && u.title !== u.id ? u.title : u.displayName || "Workflow";
     title.title = title.textContent;
-    const status = u.failed ? "failed" : u.cancelled ? "cancelled" : u.done && /completed|success/.test(u.phase) ? "done" : String(u.phase || "").replace(/[_-]+/g, " ");
+    if (!u.done) toggle.setAttribute("aria-label", `${record.expanded ? "Collapse" : "Expand"} ${title.textContent}`);
+    const status = u.failed ? "failed" : u.cancelled ? "cancelled" : u.done ? "done" : String(u.phase || "").replace(/[_-]+/g, " ");
     const position = workflowPhaseLabel(u);
     const lifecycle = u.done || /paus|interrupt|budget|block|permission/i.test(u.phase || "");
-    el.querySelector(".run-progress-phase").textContent = `· ${position || status}${position && lifecycle ? ` · ${status}` : ""}`;
+    el.querySelector(".run-progress-phase").textContent = position || lifecycle ? `· ${position || status}${position && lifecycle ? ` · ${status}` : ""}` : "";
     const elapsed = el.querySelector(".run-progress-elapsed");
     elapsed.hidden = !Number.isFinite(u.elapsedMs);
     elapsed.textContent = elapsed.hidden ? "" : `· ${workflowElapsed(u.elapsedMs)}`;
     elapsed.title = "Reported workflow elapsed time; advances only when reported";
 
+    // Sits beside the receipt rather than inside the disclosure: "updated 3s
+    // ago" is true of a run whose agents are all stuck, so the two lines have
+    // to be readable together or the fresh one reassures on its own.
+    const blocked = workflowBlockages(u);
+    const blockedEl = el.querySelector(".workflow-blocked");
+    blockedEl.hidden = !blocked.length;
+    blockedEl.textContent = blocked.length ? workflowBlockageSummary(blocked) : "";
+
     const strip = el.querySelector(".workflow-phases");
+    const dots = el.querySelector(".workflow-dots");
     strip.replaceChildren();
+    dots.replaceChildren();
     strip.hidden = !Array.isArray(u.phases) || !u.phases.length;
+    dots.hidden = strip.hidden || !!record.expanded;
     strip.setAttribute("aria-label", "Reported workflow phases");
-    for (const phase of u.phases || []) {
-      const item = workflowText(strip, "workflow-phase", phase.title, "li");
-      item.dataset.state = phase.state || "unknown";
-      if (phase.id) item.dataset.phaseId = phase.id;
-      item.title = `${phase.title}: ${phase.state || "state unavailable"}`;
-      item.setAttribute("aria-label", item.title);
-      if (phase.state === "active") item.setAttribute("aria-current", "step");
+    dots.setAttribute("aria-label", "Reported workflow steps");
+    // Position and state are both reported fields. Never guess completion from
+    // an index, or select an ambiguous name as the current step.
+    const phases = u.phases || [];
+    const reference = u.currentPhaseId || u.currentPhase;
+    const ids = reference ? phases.filter((p) => p.id === reference) : [];
+    const matches = u.currentPhaseId || ids.length ? ids : phases.filter((p) => reference && p.title === reference);
+    for (const phase of phases) {
+      const current = matches.length === 1 ? phase === matches[0] : !reference && phase.state === "active";
+      const phaseState = current ? "active" : phase.state || "unknown";
+      for (const [parent, className, label, tag] of [[strip, "workflow-phase", phase.title, "li"], [dots, "workflow-dot", "", "span"]]) {
+        const item = workflowText(parent, className, label, tag);
+        item.dataset.state = phaseState;
+        if (phase.id) item.dataset.phaseId = phase.id;
+        item.title = `${phase.title}: ${current ? "current" : phase.state || "state unavailable"}`;
+        item.setAttribute("aria-label", item.title);
+        if (current) item.setAttribute("aria-current", "step");
+      }
     }
-    for (const [selector, value] of [[".run-progress-sub", u.subtitle], [".run-progress-detail", u.detail]]) {
+    let detailText = u.detail;
+    if (detailText && Number.isFinite(u.agentsUsed) && Number.isFinite(u.agentBudget)) {
+      detailText = detailText.replace(`${u.agentsUsed} of ${u.agentBudget} agents used`, `${formatCount(u.agentsUsed)} of ${formatCount(u.agentBudget)} agents used`);
+    }
+    for (const [selector, value] of [[".run-progress-sub", u.subtitle], [".run-progress-detail", detailText]]) {
       const target = el.querySelector(selector);
       target.hidden = !value;
       target.textContent = value || "";
     }
     const spend = el.querySelector(".workflow-spend");
     const spendText = Number.isFinite(u.agentsUsed)
-      ? (Number.isFinite(u.agentBudget) ? `${u.agentsUsed} of ${u.agentBudget} agents used` : `${u.agentsUsed} agents used`) : "";
-    spend.hidden = !spendText || (u.detail || "").includes(spendText);
+      ? (Number.isFinite(u.agentBudget) ? `${formatCount(u.agentsUsed)} of ${formatCount(u.agentBudget)} agents used` : `${formatCount(u.agentsUsed)} agents used`)
+      : Number.isFinite(u.agentBudget) ? `${formatCount(u.agentBudget)} agent budget` : "";
+    spend.hidden = !spendText || (detailText || "").includes(spendText);
     spend.textContent = spendText;
     const roster = el.querySelector(".workflow-roster");
     roster.hidden = !Array.isArray(u.agents);
-    roster.replaceChildren();
-    (u.agents || []).forEach((agent, i) => {
-      const row = workflowText(roster, "workflow-agent", "", "li");
+    const existing = new Map([...roster.children].filter((row) => row._agentKey).map((row) => [row._agentKey, row]));
+    const rows = (u.agents || []).map((agent, i, agents) => {
+      const key = workflowAgentKey(agent, agents);
+      const row = existing.get(key) || document.createElement("li");
+      row.className = "workflow-agent";
+      row._agentKey = key;
       row.dataset.agentIndex = String(i);
       row.dataset.state = agent.state || "unknown";
-      workflowText(row, "workflow-agent-name", agent.label, "strong");
-      workflowText(row, "workflow-agent-state", [agent.phase, agent.state ? `reported ${agent.state.replace(/[_-]+/g, " ")}` : "state unavailable",
-        Number.isFinite(agent.tokensUsed) ? `${agent.tokensUsed} tokens` : ""].filter(Boolean).join(" · "));
-      workflowText(row, "workflow-agent-activity", "");
+      if (!row.firstChild) {
+        const button = workflowText(row, "workflow-agent-toggle", "", "button");
+        button.type = "button";
+        button.setAttribute("aria-expanded", "false");
+        workflowText(button, "workflow-agent-name", "", "strong");
+        workflowText(button, "workflow-agent-state", "", "span");
+        const detail = workflowText(row, "workflow-agent-detail", "");
+        detail.hidden = true;
+        workflowText(detail, "workflow-agent-activity", "");
+        button.onclick = () => {
+          detail.hidden = !detail.hidden;
+          button.setAttribute("aria-expanded", String(!detail.hidden));
+        };
+      }
+      row.querySelector(".workflow-agent-name").textContent = agent.label;
+      row.querySelector(".workflow-agent-state").textContent = [agent.phase, agent.state ? `reported ${agent.state.replace(/[_-]+/g, " ")}` : "",
+        Number.isFinite(agent.tokensUsed) ? `${formatCount(agent.tokensUsed)} tokens` : ""].filter(Boolean).join(" · ");
+      row.querySelector(".workflow-agent-activity").textContent = workflowAgentActivity(record, agent);
+      return row;
     });
+    for (const child of [...roster.children]) if (!rows.includes(child)) child.remove();
+    rows.forEach((row, i) => { if (roster.children[i] !== row) roster.insertBefore(row, roster.children[i] || null); });
     if (Array.isArray(u.agents) && !u.agents.length) workflowText(roster, "workflow-agent-empty", "No agents reported", "li");
 
     const actions = el.querySelector(".run-progress-actions");
@@ -13883,6 +13973,35 @@
     }
   }
 
+  function renderWorkflowTranscript(el, record) {
+    const u = record.update;
+    const name = u.title && u.title !== u.id ? u.title : u.displayName || "Workflow";
+    el.classList.toggle("run-progress-failed", !!u.failed);
+    el.classList.toggle("run-progress-cancelled", !!u.cancelled && !u.failed);
+    el.classList.toggle("run-progress-done", !!u.done);
+    if (!u.done) {
+      el.replaceChildren();
+      const status = /paus|interrupt|budget|block|permission/i.test(u.phase || "") ? String(u.phase).replace(/[_-]+/g, " ") : "running";
+      workflowText(el, "workflow-marker", `${name} · ${status}`);
+      return;
+    }
+    let report = el.querySelector(".workflow-report");
+    if (!report) {
+      el.replaceChildren();
+      report = workflowText(el, "workflow-report", "", "details");
+      workflowText(report, "workflow-report-toggle", "", "summary");
+      workflowText(report, "workflow-report-body", "");
+    }
+    report.querySelector("summary").textContent = `${name} · ${u.failed ? "failed" : u.cancelled ? "cancelled" : "done"}`;
+    const body = report.querySelector(".workflow-report-body");
+    renderWorkflowSurface(body, record);
+    // Finished reports have one disclosure, with all fixed content inside it.
+    body.querySelector(".run-progress-title").hidden = true;
+    body.querySelector(".workflow-dots").hidden = true;
+    body.querySelector(".workflow-chevron").hidden = true;
+    body.querySelector(".workflow-expanded").hidden = false;
+  }
+
   function syncWorkflowPin() {
     const records = [...state.runProgressCards.values()].map((el) => el._workflow)
       .filter((r) => r && !r.update.done && r.receivedAt != null)
@@ -13896,23 +14015,10 @@
       workflowPin = document.createElement("section");
       workflowPin.className = "workflow-pin";
       workflowPin.setAttribute("aria-label", "Live workflows");
-      const toggle = workflowText(workflowPin, "workflow-pin-toggle", "", "button");
-      toggle.type = "button";
-      toggle.setAttribute("aria-controls", "workflow-pin-runs");
-      toggle.onclick = () => {
-        workflowPinExpanded = !workflowPinExpanded;
-        syncWorkflowPin();
-      };
-      const stack = workflowText(workflowPin, "workflow-pin-runs", "");
-      stack.id = "workflow-pin-runs";
-      // All three hosts provide this scrollport. Normal flex flow shrinks it;
-      // the pin never covers transcript text or depends on host HTML changes.
+      workflowText(workflowPin, "workflow-pin-runs", "");
       messagesEl.parentNode.insertBefore(workflowPin, messagesEl.nextSibling);
     }
-    workflowPin.classList.toggle("is-expanded", workflowPinExpanded);
-    const toggle = workflowPin.querySelector(".workflow-pin-toggle");
-    toggle.textContent = `${records.length} live workflow${records.length === 1 ? "" : "s"} · ${workflowPinExpanded ? "Collapse" : "Expand"}`;
-    toggle.setAttribute("aria-expanded", String(workflowPinExpanded));
+    workflowPin.classList.toggle("is-expanded", records.some((r) => r.expanded));
     const stack = workflowPin.querySelector(".workflow-pin-runs");
     for (const child of [...stack.children]) {
       if (!records.some((r) => r.pin === child)) child.remove();
@@ -13944,7 +14050,7 @@
       appendTranscriptChild(el);
     }
     let record = el._workflow;
-    if (!record) record = el._workflow = { update, activity: new Map(), receivedAt: null, pin: null };
+    if (!record) record = el._workflow = { update, activity: new Map(), receivedAt: null, pin: null, expanded: false };
     const historical = state.replaying;
     if (!historical) record.receivedAt = Date.now();
     const stale = Number.isFinite(update.revision) && Number.isFinite(record.update.revision) && update.revision < record.update.revision;
@@ -13959,9 +14065,9 @@
         let event = record.activity.get(key);
         if (!historical && previous) {
           if (Number.isFinite(previous.tokensUsed) && Number.isFinite(agent.tokensUsed) && agent.tokensUsed > previous.tokensUsed) {
-            event = { kind: "tokens moved", at: Date.now() };
+            event = { kind: "tokens moved", at: Date.now(), tokensObserved: true };
           } else if (previous.state && agent.state && previous.state !== agent.state) {
-            event = { kind: "state changed", at: Date.now() };
+            event = { kind: "state changed", at: Date.now(), tokensObserved: !!event?.tokensObserved };
           }
         }
         if (event && !historical) nextActivity.set(key, event);
@@ -13969,7 +14075,8 @@
       record.activity = nextActivity;
       record.update = update;
     }
-    renderWorkflowSurface(el, record);
+    renderWorkflowTranscript(el, record);
+    syncWorkflowToolMarkers();
     syncWorkflowPin();
     refreshWorkflowAges();
     if (!historical && !workflowAgeTimer) workflowAgeTimer = setInterval(refreshWorkflowAges, 1000);
@@ -15263,7 +15370,7 @@
       subtitle.className = "card-subtitle";
       const oldLines = (diff.oldText || "").split("\n").length;
       const newLines = (diff.newText || "").split("\n").length;
-      subtitle.textContent = `${diff.path} — ${oldLines} → ${newLines} lines`;
+      subtitle.textContent = `${diff.path} — ${formatCount(oldLines)} → ${formatCount(newLines)} lines`;
       el.appendChild(subtitle);
 
       const openDiff = () => {
@@ -17607,10 +17714,10 @@
     if (find.countEl) {
       if (!q) find.countEl.textContent = "";
       else if (find.invalid) find.countEl.textContent = "—";
-      else if (!n) find.countEl.textContent = find.lastCapped ? "0/" + FIND_MAX_MATCHES + "+" : "0/0";
+      else if (!n) find.countEl.textContent = find.lastCapped ? "0/" + formatCount(FIND_MAX_MATCHES) + "+" : "0/0";
       else {
         const cap = find.lastCapped ? "+" : "";
-        find.countEl.textContent = (find.index + 1) + "/" + n + cap;
+        find.countEl.textContent = formatCount(find.index + 1) + "/" + formatCount(n) + cap;
       }
     }
     if (find.hiddenBtn) {
@@ -17825,7 +17932,7 @@
           find.matches = acc;
           find.invalid = false;
           rebuildFindNav();
-          if (find.countEl) find.countEl.textContent = find.nav.length + "…";
+          if (find.countEl) find.countEl.textContent = formatCount(find.nav.length) + "…";
           find.sliceTimer = setTimeout(step, 0);
           return;
         }
@@ -17850,7 +17957,7 @@
         find.matches = acc;
         find.invalid = false;
         rebuildFindNav();
-        if (find.countEl) find.countEl.textContent = find.nav.length + "…";
+        if (find.countEl) find.countEl.textContent = formatCount(find.nav.length) + "…";
         find.sliceTimer = setTimeout(step, 0);
         return;
       }
