@@ -2601,7 +2601,6 @@ export class GrokSidebar {
   }
 
   private defaultEffortForProvider(provider: AcpProvider): string {
-    if (provider === "muse") return "";
     return rememberedEffort(
       this.state.get<EffortPrefs>(EFFORT_PREFS_KEY),
       provider,
@@ -2622,7 +2621,6 @@ export class GrokSidebar {
   }
 
   private async rememberProviderEffort(provider: AcpProvider, level: string): Promise<void> {
-    if (provider === "muse") return;
     if (provider === "grok") {
       await this.rememberGrokConfig("defaultEffort", level);
       return;
@@ -3249,7 +3247,6 @@ export class GrokSidebar {
     clientId: string | undefined,
     requester: RemoteRequester | undefined,
   ): Promise<void> {
-    if (session.provider === "muse") return;
     if (session.priming) return; // ignore changes fired mid-session-start (see switchModel)
 
     if (!session.hasHistory || !session.client) {

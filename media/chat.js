@@ -4658,7 +4658,8 @@
   }
 
   function renderEffortStrip() {
-    if (state.activeProvider === "muse") return;
+    const model = currentModel();
+    if (model?.supportsReasoningEffort === false && !model.reasoningEfforts?.length) return;
     const box = document.createElement("div");
     box.className = "model-effort-strip";
     const levels = currentModel() ? effortLevelsForModel() : [];
