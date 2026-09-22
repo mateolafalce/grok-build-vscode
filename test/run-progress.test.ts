@@ -10,6 +10,23 @@ import {
 } from "../src/run-progress";
 
 const statelessRuns = JSON.parse(readFileSync(new URL("fixtures/workflow-stateless-phases.json", import.meta.url), "utf8")).runs;
+const outputRuns = JSON.parse(readFileSync(new URL("fixtures/workflow-output.json", import.meta.url), "utf8")).runs;
+
+describe("workflow content provenance", () => {
+  it.each(outputRuns)("preserves result provenance and the legacy detail for $run_id", (run) => {
+    const u = parseRunProgressUpdate(run)!;
+    const payload = run.result_summary || "Workflow outcome ignored: ignored cancelled while status is cancelled";
+    expect({ content: u.workflowContent, legacy: u.detail }).toEqual({
+      content: { resultSummary: run.result_summary || null, pauseMessage: null },
+      legacy: `${run.current_phase} · ${payload} · ${run.agents_used} of ${run.agent_budget} agents used`,
+    });
+  });
+  it("separates pause reasons from results and explicitly clears missing content", () => {
+    const parse = (over: object) => parseRunProgressUpdate({ sessionUpdate: "workflow_updated", run_id: "r", ...over })!.workflowContent;
+    expect([parse({ resultSummary: "A result", pauseMessage: "Review required" }), parse({ last_event: "log", last_event_detail: "bookkeeping" })])
+      .toEqual([{ resultSummary: "A result", pauseMessage: "Review required" }, { resultSummary: null, pauseMessage: null }]);
+  });
+});
 
 describe("the CLI workflow state store", () => {
   it("repairs stale notifications from terminal two-stage states without inventing phase states", () => {

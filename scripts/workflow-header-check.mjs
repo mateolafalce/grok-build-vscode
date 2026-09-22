@@ -7,6 +7,7 @@ import { chromium } from "playwright";
 
 const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
 const statelessRuns = JSON.parse(read("test/fixtures/workflow-stateless-phases.json")).runs;
+const outputRuns = JSON.parse(read("test/fixtures/workflow-output.json")).runs;
 const body = read("test/webview-harness.ts").match(/export const BODY = `([\s\S]*?)`;/)[1];
 const shell = read("src/desktop/electron-webview.ts");
 const palette = shell.match(/:root \{[\s\S]*?\n\}/)[0];
@@ -35,6 +36,7 @@ try {
       await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", { data: {
         type: "runProgress", update: {
           kind: "workflow", id: "header-check", displayName: "deep-research", phase: "running",
+          subtitle: "Research the first powered flight",
           currentPhase: "Verify", elapsedMs: 106000, done: false,
           phases: ["Plan", "Research", "Verify", "Report"].map(title => ({ title, state: title === "Verify" ? "active" : "pending" })),
           agents: Array.from({ length: 16 }, (_, i) => ({
@@ -56,12 +58,19 @@ try {
       };
       await checkDisclosure(header.locator("button"), ".workflow-chevron", false);
       const phase = header.locator(".run-progress-phase");
-      assert.equal(await phase.textContent(), "· Verify");
+      assert.equal(await phase.textContent(), "Verify");
       assert.equal(await phase.evaluate(el => getComputedStyle(el).clipPath), "none");
       assert.equal(await header.locator(".run-progress-elapsed").textContent(), "1:46");
       await header.locator("button").click();
       await checkDisclosure(header.locator("button"), ".workflow-chevron", true);
-      assert.equal(await phase.evaluate(el => getComputedStyle(el).clipPath), "inset(50%)");
+      assert.equal(await phase.textContent(), "");
+      assert.deepEqual(await page.locator(".workflow-pin-run").evaluate(el => {
+        const purpose = el.querySelector(".run-progress-sub");
+        const progress = el.querySelector(".workflow-progress");
+        return { purpose: purpose.innerText,
+          summaryFirst: purpose.getBoundingClientRect().bottom <= progress.getBoundingClientRect().top,
+          clock: progress.querySelector(".run-progress-elapsed")?.textContent };
+      }), { purpose: "Research the first powered flight", summaryFirst: true, clock: "1:46" });
       const rows = page.locator(".workflow-pin-run .workflow-agent");
       assert.equal(await rows.locator("button, .workflow-agent-chevron").count(), 0,
         "a positive-total snapshot has no observed activity to disclose");
@@ -144,7 +153,7 @@ try {
       await report.locator("summary").click();
       assert.equal(await report.locator('.workflow-phase[data-state="done"]').count(), 4);
       assert.equal(await report.locator('[aria-current="step"]').count(), 0);
-      assert.match(await report.innerText(), /Partial · 6 of 16 agents used/);
+      assert.equal(await report.locator(".workflow-output").count(), 0, "legacy detail has no output provenance");
       assert.match(await report.locator(".workflow-phase").last().evaluate(el => getComputedStyle(el, "::before").content), /✓/);
       // A finished report has one disclosure -- the summary. Its own
       // heading chevron must actually disappear, not just carry `hidden`.
@@ -187,6 +196,45 @@ try {
         for (const report of await page.locator(".workflow-report").all()) await report.locator("summary").click();
         assert.equal(await page.locator('.workflow-phase[data-state="done"]').count(), 4);
         assert.equal(await page.locator(".workflow-agent button, .workflow-agent-chevron").count(), 0);
+      }
+      // Source-preserving hosts and legacy hosts use the same phone client.
+      for (const legacy of [false, true]) {
+        await page.evaluate(({ runs, legacy }) => {
+          const send = data => window.dispatchEvent(new MessageEvent("message", { data }));
+          send({ type: "clearMessages" });
+          for (const run of runs) send({ type: "runProgress", update: {
+            kind: "workflow", id: run.run_id, title: run.name, displayName: run.name,
+            phase: run.status, done: true, cancelled: run.status === "cancelled",
+            subtitle: run.objective, currentPhase: run.current_phase, phases: run.phases,
+            elapsedMs: run.elapsed_ms, agentsUsed: run.agents_used, agentBudget: run.agent_budget,
+            agents: run.agents.map(a => ({ id: a.agent_id, label: a.label, phase: a.phase, state: a.state, tokensUsed: a.tokens_used })),
+            detail: `${run.current_phase} · ${run.result_summary || "Workflow outcome ignored: ignored cancelled while status is cancelled"} · ${run.agents_used} of ${run.agent_budget} agents used`,
+            ...(!legacy ? { workflowContent: { resultSummary: run.result_summary || null, pauseMessage: null } } : {}),
+          } });
+        }, { runs: outputRuns, legacy });
+        for (const [index, report] of (await page.locator(".workflow-report").all()).entries()) {
+          await report.locator("summary").click();
+          const layout = await report.evaluate(el => {
+            const blocks = [...el.querySelectorAll(".run-progress-sub, .workflow-progress, .workflow-output, .workflow-roster")];
+            const rects = blocks.map(b => b.getBoundingClientRect());
+            return {
+              order: blocks.map(b => b.className),
+              stacked: rects.every((r, i) => i === 0 || r.top >= rects[i - 1].bottom),
+              overflow: el.scrollWidth > el.clientWidth,
+              phase: el.querySelector(".run-progress-phase").textContent,
+              output: el.querySelector(".workflow-output-body")?.innerText ?? null,
+              headings: el.querySelectorAll(".workflow-output h3").length,
+              diagnostic: el.innerText.includes("ignored cancelled"),
+            };
+          });
+          assert.deepEqual(layout, {
+            order: ["run-progress-sub", "workflow-progress", ...(!legacy && index < 2 ? ["workflow-output"] : []), "workflow-roster"],
+            stacked: true, overflow: false, phase: "",
+            output: legacy || index === 2 ? null : index === 1 ? "The workflow finished its first step." :
+              "Status: Partial — see the full report for coverage gaps.\n\nOn 17 December 1903, Orville Wright piloted the Wright Flyer. [S5]\nWhy earlier attempts do not count\nOn 14 December Wilbur Wright made a downhill start.\nThe other flights that morning\nThe brothers alternated. [S2][S11]\n\nFull report: scratch/report.md",
+            headings: !legacy && index === 0 ? 2 : 0, diagnostic: false,
+          });
+        }
       }
       // The standalone editor rail has its own stylesheet and renderer.
       // Check its real controls too; chat.css cannot fix that webview.

@@ -28,6 +28,22 @@ function replay() {
 const text = (h: Harness, selector: string) => h.doc.querySelector(selector)?.textContent ?? "";
 
 const statelessRuns = JSON.parse(readFileSync(new URL("fixtures/workflow-stateless-phases.json", import.meta.url), "utf8")).runs;
+const outputRuns = JSON.parse(readFileSync(new URL("fixtures/workflow-output.json", import.meta.url), "utf8")).runs;
+
+describe("old host output compatibility", () => {
+  it.each(outputRuns)("omits ambiguous legacy detail while settling $run_id", (run) => {
+    const h = replay();
+    const { workflowContent, ...legacy } = parseRunProgressUpdate(run)!;
+    dispatch(h.window, { type: "historyReplay", active: true });
+    dispatch(h.window, { type: "runProgress", update: legacy });
+    dispatch(h.window, { type: "historyReplay", active: false });
+    expect({ output: h.doc.querySelector(".workflow-output"), pin: h.doc.querySelector(".workflow-pin"),
+      detail: text(h, ".run-progress-detail"), summary: text(h, ".run-progress-sub"),
+      spend: text(h, ".workflow-spend"), open: (h.doc.querySelector("details") as HTMLDetailsElement).open,
+    }).toEqual({ output: null, pin: null, detail: "", summary: run.objective,
+      spend: `${run.agents_used} of ${run.agent_budget} agents used`, open: false });
+  });
+});
 
 describe("completion without a terminal notification", () => {
   it.each(["live", "unobserved completion", "cold replay", "browser reload"])("reconciles both CLI state files for %s and settles closed reports", (mode) => {
@@ -136,7 +152,8 @@ describe("the captured workflow lifecycle", () => {
     expect(h.doc.querySelector(".workflow-pin, .workflow-marker, [aria-current=step]")).toBeNull();
     expect(text(h, ".workflow-report-toggle")).toBe("deep-research · done");
     expect(text(h, ".workflow-card .run-progress-elapsed")).toBe("6:30");
-    expect(text(h, ".workflow-card .run-progress-detail")).toBe("Report · Partial · 6 of 16 agents used");
+    expect(text(h, ".workflow-card .workflow-output-body")).toBe("Partial");
+    expect(text(h, ".workflow-card .workflow-spend")).toBe("6 of 16 agents used");
     expect(h.doc.querySelectorAll('.workflow-phase[data-state="done"]')).toHaveLength(4);
   });
 
@@ -160,7 +177,7 @@ describe("the captured workflow lifecycle", () => {
       expect(text(h, ".workflow-agent-activity")).not.toMatch(/tokens moved|state changed/);
       expect(h.doc.querySelector(".workflow-card .blink-dots")).toBeNull();
     }
-    expect(text(h, ".workflow-pin .run-progress-phase")).toBe("· Plan · user paused");
+    expect(text(h, ".workflow-pin .run-progress-phase")).toBe("Plan · user paused");
     expect([...h.doc.querySelectorAll(".workflow-pin .run-progress-btn")].map((b) => b.textContent)).toEqual(["Resume", "Stop"]);
   });
   it("observes a cancelled state transition without portraying it as ongoing work", () => {
@@ -175,7 +192,7 @@ describe("the captured workflow lifecycle", () => {
   it("ends the pin on stop while retaining the reported duration and roster in the transcript", () => {
     const h = replay(); frames.forEach((_, i) => h.frame(i));
     expect(h.doc.querySelector(".workflow-pin")).toBeNull();
-    expect(text(h, ".workflow-card .run-progress-phase")).toBe("· Plan · cancelled");
+    expect(text(h, ".workflow-card .run-progress-phase")).toBe("");
     expect(text(h, ".workflow-card .run-progress-elapsed")).toBe("0:00");
     expect(text(h, ".workflow-agent-state")).toBe("Plan · cancelled · 0 tokens");
     expect(h.doc.querySelector(".workflow-card")!.classList.contains("run-progress-cancelled")).toBe(true);

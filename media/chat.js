@@ -1947,6 +1947,7 @@
         })
         .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
         .replace(/\*([^*\n]+)\*/g, "<em>$1</em>")
+        .replace(/(^|[^\p{L}\p{N}_])_([^_\n]+)_(?=$|[^\p{L}\p{N}_])/gu, "$1<em>$2</em>")
         .replace(/\x00C(\d+)\x00/g, (_, i) => held[+i]);
     }
 
@@ -13783,6 +13784,13 @@
     return name || "";
   }
 
+  // The live lifecycle word, humanized. An empty phase means ordinarily
+  // running: the CLI only fills it once something has happened to the run.
+  function workflowLiveStatus(update) {
+    return /paus|interrupt|budget|block|permission/i.test(update.phase || "")
+      ? String(update.phase).replace(/[_-]+/g, " ").trim() || "running" : "running";
+  }
+
   function workflowElapsed(ms) {
     const seconds = Math.floor(Math.max(0, ms) / 1000);
     return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
@@ -13857,34 +13865,68 @@
     }
   }
 
+  function workflowOutputText(raw) {
+    if (typeof raw !== "string") return "";
+    const text = raw.trim();
+    // The CLI renders a null completion value as "done".
+    if (!text || text === "done") return "";
+    try {
+      const value = JSON.parse(text);
+      if (typeof value === "string") return workflowOutputText(value);
+      if (value && !Array.isArray(value) && typeof value === "object") {
+        // Known human-facing fields, not arbitrary strings such as status,
+        // paths or ids. Workflow completion values have no universal schema.
+        for (const field of ["report", "summary", "sentence"]) {
+          const content = workflowOutputText(value[field]);
+          if (content) return content;
+        }
+      }
+      return "";
+    } catch {
+      // summarize_result caps at 16KiB: a truncated JSON object must not
+      // fall back to a raw blob. Nor should a JSON code fence bypass this.
+      if (/^(?:\{|\[\s*(?:["{[\d-]|true\b|false\b|null\b|\]))/.test(text) || /^```(?:json)?\s*[\r\n]/i.test(text)) return "";
+      return text;
+    }
+  }
+
   function renderWorkflowSurface(el, record) {
     const u = record.update;
     if (!el.firstChild) {
       const headingTag = u.done ? "div" : "button";
       el.innerHTML = `<div class="workflow-heading"><${headingTag} class="workflow-pin-toggle run-progress-row"><span class="run-progress-title"></span><span class="workflow-dots" hidden></span><span class="run-progress-phase"></span><span class="run-progress-elapsed" hidden></span><span class="workflow-chevron" aria-hidden="true"></span></${headingTag}></div>` +
-        `<div class="workflow-receipt"></div><div class="workflow-blocked" hidden></div><div class="workflow-expanded" hidden><ol class="workflow-phases" hidden></ol><div class="run-progress-sub" hidden></div><div class="run-progress-detail" hidden></div><div class="workflow-spend" hidden></div><ul class="workflow-roster" hidden></ul></div><div class="run-progress-actions"></div>`;
+        `<div class="run-progress-sub" hidden></div><div class="workflow-progress"><ol class="workflow-phases" hidden></ol><div class="workflow-timing"></div><div class="workflow-receipt"></div><div class="workflow-blocked" hidden></div><div class="run-progress-detail" hidden></div><div class="workflow-spend" hidden></div></div><div class="workflow-expanded" hidden><ul class="workflow-roster" hidden></ul></div><div class="run-progress-actions"></div>`;
       if (!u.done) el.querySelector(".workflow-pin-toggle").onclick = () => {
         record.expanded = !record.expanded;
         syncWorkflowPin();
       };
     }
-    el.classList.toggle("is-expanded", !!record.expanded);
+    const expanded = u.done || !!record.expanded;
+    el.classList.toggle("is-expanded", expanded);
     const toggle = el.querySelector(".workflow-pin-toggle");
     if (!u.done) {
       toggle.type = "button";
       toggle.setAttribute("aria-expanded", String(!!record.expanded));
     }
-    el.querySelector(".workflow-expanded").hidden = !record.expanded;
+    el.querySelector(".workflow-expanded").hidden = !expanded;
     el.querySelector(".workflow-chevron").innerHTML = record.expanded ? ICON.chevronDown : ICON.chevronRight;
     const title = el.querySelector(".run-progress-title");
     title.textContent = u.title && u.title !== u.id ? u.title : u.displayName || "Workflow";
     title.title = title.textContent;
     if (!u.done) toggle.setAttribute("aria-label", `${record.expanded ? "Collapse" : "Expand"} ${title.textContent}`);
-    const status = u.failed ? "failed" : u.cancelled ? "cancelled" : u.done ? "done" : String(u.phase || "").replace(/[_-]+/g, " ");
     const position = workflowPhaseLabel(u);
-    const lifecycle = u.done || /paus|interrupt|budget|block|permission/i.test(u.phase || "");
-    el.querySelector(".run-progress-phase").textContent = position || lifecycle ? `· ${position || status}${position && lifecycle ? ` · ${status}` : ""}` : "";
+    // Expanded, the heading carries the status and the strip carries the step.
+    // Collapsed, neither is on screen, so a run that has STOPPED must say so
+    // here or it is indistinguishable from one still working.
+    const live = workflowLiveStatus(u);
+    el.querySelector(".run-progress-phase").textContent = expanded ? ""
+      : live === "running" ? position
+      : position ? `${position} · ${live}` : live;
     const elapsed = el.querySelector(".run-progress-elapsed");
+    const timing = el.querySelector(".workflow-timing");
+    if (expanded) timing.appendChild(elapsed);
+    else toggle.insertBefore(elapsed, el.querySelector(".workflow-chevron"));
+    timing.hidden = !expanded || !Number.isFinite(u.elapsedMs);
     elapsed.hidden = !Number.isFinite(u.elapsedMs);
     elapsed.textContent = elapsed.hidden ? "" : workflowElapsed(u.elapsedMs);
     elapsed.title = "Reported workflow elapsed time; advances only when reported";
@@ -13901,8 +13943,9 @@
     const dots = el.querySelector(".workflow-dots");
     strip.replaceChildren();
     dots.replaceChildren();
-    strip.hidden = !Array.isArray(u.phases) || !u.phases.length;
-    dots.hidden = strip.hidden || !!record.expanded;
+    const hasPhases = Array.isArray(u.phases) && u.phases.length;
+    strip.hidden = !hasPhases || !expanded;
+    dots.hidden = !hasPhases || expanded;
     strip.setAttribute("aria-label", "Reported workflow phases");
     dots.setAttribute("aria-label", "Reported workflow steps");
     // Position and state are both reported fields. Never guess completion from
@@ -13929,21 +13972,39 @@
         if (current) item.setAttribute("aria-current", "step");
       }
     }
-    let detailText = u.detail;
-    if (detailText && Number.isFinite(u.agentsUsed) && Number.isFinite(u.agentBudget)) {
-      detailText = detailText.replace(`${u.agentsUsed} of ${u.agentBudget} agents used`, `${formatCount(u.agentsUsed)} of ${formatCount(u.agentBudget)} agents used`);
-    }
+    // Legacy detail mixes results, pause reasons and arbitrary CLI events.
+    // Its provenance cannot be recovered by splitting on a separator. Only
+    // source-preserving hosts can provide output; do not guess on old hosts.
+    const detailText = u.workflowContent?.pauseMessage;
     for (const [selector, value] of [[".run-progress-sub", u.subtitle], [".run-progress-detail", detailText]]) {
       const target = el.querySelector(selector);
-      target.hidden = !value;
+      target.hidden = !expanded || !value;
       target.textContent = value || "";
     }
     const spend = el.querySelector(".workflow-spend");
     const spendText = Number.isFinite(u.agentsUsed)
       ? (Number.isFinite(u.agentBudget) ? `${formatCount(u.agentsUsed)} of ${formatCount(u.agentBudget)} agents used` : `${formatCount(u.agentsUsed)} agents used`)
       : Number.isFinite(u.agentBudget) ? `${formatCount(u.agentBudget)} agent budget` : "";
-    spend.hidden = !spendText || (detailText || "").includes(spendText);
+    spend.hidden = !expanded || !spendText;
     spend.textContent = spendText;
+    const outputText = workflowOutputText(u.workflowContent?.resultSummary);
+    let output = el.querySelector(".workflow-output");
+    if (!outputText) {
+      if (output) output.remove();
+    } else {
+      if (!output) {
+        output = document.createElement("section");
+        output.className = "workflow-output";
+        output.setAttribute("aria-label", "Output");
+        workflowText(output, "workflow-output-label", "Output", "strong");
+        workflowText(output, "workflow-output-body", "");
+        el.querySelector(".workflow-expanded").prepend(output);
+      }
+      const body = output.querySelector(".workflow-output-body");
+      body.innerHTML = renderMarkdown(outputText);
+      applyAutoDir(body);
+      renderMermaidIn(body);
+    }
     const roster = el.querySelector(".workflow-roster");
     roster.hidden = !Array.isArray(u.agents);
     const existing = new Map([...roster.children].filter((row) => row._agentKey).map((row) => [row._agentKey, row]));
@@ -14027,7 +14088,7 @@
     el.classList.toggle("run-progress-done", !!u.done);
     if (!u.done) {
       el.replaceChildren();
-      const status = /paus|interrupt|budget|block|permission/i.test(u.phase || "") ? String(u.phase).replace(/[_-]+/g, " ") : "running";
+      const status = workflowLiveStatus(u);
       const marker = workflowText(el, "workflow-marker", "");
       // Every other line in the transcript that reports work carries an icon;
       // a bare string beside them reads as something half-drawn.

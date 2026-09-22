@@ -30,6 +30,84 @@ const agent = (h: Harness) => pin(h).querySelector(".workflow-agent")!;
 const activity = (h: Harness) => agent(h).querySelector(".workflow-agent-activity")!.textContent;
 const expand = (h: Harness) => click(h.window, pin(h).querySelector(".workflow-pin-toggle")!);
 const hidden = (el: Element | null) => !!el?.hasAttribute("hidden");
+const outputRuns = JSON.parse(readFileSync(new URL("fixtures/workflow-output.json", import.meta.url), "utf8")).runs;
+
+describe("workflow output", () => {
+  it.each(outputRuns)("separates summary, progress, output and roster for $run_id", (run) => {
+    const h = boot(); send(h, run);
+    const body = card(h).querySelector(".workflow-report-body")!;
+    const output = body.querySelector(".workflow-output");
+    expect({
+      order: [...body.querySelectorAll(".run-progress-sub, .workflow-progress, .workflow-output, .workflow-roster")].map(el => el.className),
+      phase: body.querySelector(".run-progress-phase")!.textContent,
+      clock: body.querySelector(".workflow-progress .run-progress-elapsed")!.textContent,
+      label: output?.getAttribute("aria-label") ?? null,
+      strong: output?.querySelector("strong:not(.workflow-output-label)")?.textContent ?? null,
+      headings: [...(output?.querySelectorAll("h3") || [])].map(el => el.textContent),
+      footer: output?.querySelector("em")?.textContent ?? null,
+      text: run.run_id === "json" ? output?.querySelector(".workflow-output-body")?.textContent : null,
+      diagnostic: body.textContent?.includes("ignored cancelled"),
+      spend: body.querySelector(".workflow-spend")!.textContent,
+    }).toEqual({
+      order: ["run-progress-sub", "workflow-progress", ...(run.result_summary ? ["workflow-output"] : []), "workflow-roster"],
+      phase: "", clock: run.run_id === "markdown" ? "22:52" : run.run_id === "json" ? "0:12" : "1:50",
+      label: run.result_summary ? "Output" : null,
+      strong: run.run_id === "markdown" ? "Status: Partial" : null,
+      headings: run.run_id === "markdown" ? ["Why earlier attempts do not count", "The other flights that morning"] : [],
+      footer: run.run_id === "markdown" ? "Full report: scratch/report.md" : null,
+      text: run.run_id === "json" ? "The workflow finished its first step." : null,
+      diagnostic: false, spend: `${run.agents_used} of ${run.agent_budget} agents used`,
+    });
+  });
+
+  it.each([undefined, "", "done", "null", "42", "true", '["machine"]', '{"status":"ok","path":"scratch/a.md"}', '{"summary":"truncated', '```json\n{"status":"ok"}\n```'])
+    ("omits the output block for non-human payload %s", (result_summary) => {
+      const h = boot(); send(h, { status: "complete", result_summary });
+      expect(card(h).querySelector(".workflow-output")).toBeNull();
+    });
+
+  it.each(["report", "summary", "sentence"])("extracts only the human %s field from JSON", (field) => {
+    const h = boot(); send(h, { status: "complete", result_summary: JSON.stringify({ [field]: "**Readable**", status: "ok", count: 7 }) });
+    expect(card(h).querySelector(".workflow-output-body")?.innerHTML).toBe("<strong>Readable</strong>");
+  });
+
+  it("uses the message markdown sanitization boundary for workflow output", () => {
+    const h = boot();
+    const raw = '**Safe** <img src=x onerror=alert(1)>\n\n[bad](javascript:alert(1))\n\n<script>alert(1)</script>';
+    send(h, { status: "complete", result_summary: raw });
+    const output = card(h).querySelector(".workflow-output-body")!;
+    const event = new h.window.MouseEvent("click", { bubbles: true, cancelable: true });
+    const posted = h.posted.length;
+    output.querySelector("a")!.dispatchEvent(event as any);
+    expect({ html: output.innerHTML, unsafe: output.querySelector("script, img, [onerror]"),
+      prevented: event.defaultPrevented, posted: h.posted.slice(posted) })
+      .toEqual({ html: (h.window as any).__grokRenderMarkdown(raw), unsafe: null, prevented: true, posted: [] });
+  });
+
+  it("renders underscore emphasis without changing identifiers, code or link targets", () => {
+    const h = boot(); send(h, { status: "complete", result_summary: '_Readable_ snake_case_name `_literal_` [link](https://example.com/_literal_)' });
+    const output = card(h).querySelector(".workflow-output-body")!;
+    expect([output.querySelector("em")?.textContent, output.querySelectorAll("em").length, output.querySelector("code")?.textContent,
+      output.querySelector("a")?.getAttribute("href"), output.textContent?.includes("snake_case_name")])
+      .toEqual(["Readable", 1, "_literal_", "https://example.com/_literal_", true]);
+  });
+
+  it("preserves a report starting with a markdown link", () => {
+    const h = boot(); send(h, { status: "complete", result_summary: '[Source](https://example.com) supports the finding.' });
+    expect(card(h).querySelector(".workflow-output-body")?.textContent).toBe("Source supports the finding.");
+  });
+
+  it("keeps live summary before progress and removes a withdrawn output", () => {
+    const h = boot(); send(h, { objective: "Purpose", result_summary: "Interim result", pause_message: "Review required" }); expand(h);
+    const surface = pin(h).querySelector(".workflow-pin-run")!;
+    const before = { order: [...surface.querySelectorAll(".run-progress-sub, .workflow-progress, .workflow-output, .workflow-roster")].map(el => el.className),
+      reason: surface.querySelector(".run-progress-detail")!.textContent };
+    send(h);
+    expect({ before, output: surface.querySelector(".workflow-output") }).toEqual({ before: {
+      order: ["run-progress-sub", "workflow-progress", "workflow-output", "workflow-roster"], reason: "Review required",
+    }, output: null });
+  });
+});
 
 describe("approved workflow states", () => {
   it.each([{}, { vscode: true }, { remote: true }])("settles complete runs into history on surface %j", (options) => {
@@ -100,28 +178,16 @@ describe("approved workflow states", () => {
     h.doc.head.append(style);
     send(h);
     const phase = () => pin(h).querySelector(".workflow-heading .run-progress-phase")!;
-    const phaseStyle = () => h.window.getComputedStyle(phase() as any);
-    expect(phase().textContent).toBe("· Research");
-    expect(phaseStyle().position).not.toBe("absolute");
-    expect(phaseStyle().clipPath).not.toBe("inset(50%)");
+    expect(phase().textContent).toBe("Research");
     expand(h);
-    expect(phaseStyle().position).toBe("absolute");
-    expect(phaseStyle().clipPath).toBe("inset(50%)");
-    expect(phaseStyle().width).toBe("1px");
-    expect(phaseStyle().height).toBe("1px");
-    // Visually hidden, still available to assistive technology.
-    expect(phase().textContent).toBe("· Research");
-    expect(phase().hasAttribute("aria-hidden")).toBe(false);
-    expect(phaseStyle().display).not.toBe("none");
+    expect(phase().textContent).toBe("");
     expect(hidden(pin(h).querySelector(".workflow-phases"))).toBe(false);
     send(h, { current_phase: "Verify", elapsed_ms: 106_000 });
-    expect(phase().textContent).toBe("· Verify");
-    expect(phaseStyle().clipPath).toBe("inset(50%)");
-    expect(pin(h).querySelector(".run-progress-elapsed")!.textContent).toBe("1:46");
+    expect(phase().textContent).toBe("");
+    expect(pin(h).querySelector(".workflow-progress .run-progress-elapsed")!.textContent).toBe("1:46");
     expand(h);
-    expect(phase().textContent).toBe("· Verify");
-    expect(phaseStyle().position).not.toBe("absolute");
-    expect(phaseStyle().clipPath).not.toBe("inset(50%)");
+    expect(phase().textContent).toBe("Verify");
+    expect(pin(h).querySelector(".workflow-heading .run-progress-elapsed")!.textContent).toBe("1:46");
   });
   it("shows one line per agent and toggles each detail independently", () => {
     const h = boot();
@@ -360,12 +426,12 @@ describe("reported capabilities", () => {
     dispatch(h.window, { type: "runProgress", update: parseRunProgressUpdate({ sessionUpdate: "goal_updated", completed_deliverables: 1234, total_deliverables: 20000 }) });
     expect(h.doc.querySelector('.run-progress-card:not(.workflow-card):not(.workflow-pin-run)')!.textContent).toContain("1,234/20,000 deliverables");
   });
-  it("formats an older host's structured budget in its detail text", () => {
+  it("retains an older host's structured budget outside its ambiguous detail", () => {
     const h = boot();
     dispatch(h.window, { type: "runProgress", update: { kind: "workflow", id: "old", title: "Existing workflow", phase: "running", done: false, agentsUsed: 1234, agentBudget: 20000, detail: "1234 of 20000 agents used" } });
     expand(h);
-    expect(pin(h).querySelector(".run-progress-detail")!.textContent).toBe("1,234 of 20,000 agents used");
-    expect(hidden(pin(h).querySelector(".workflow-spend"))).toBe(true);
+    expect(pin(h).querySelector(".workflow-spend")!.textContent).toBe("1,234 of 20,000 agents used");
+    expect(hidden(pin(h).querySelector(".run-progress-detail"))).toBe(true);
   });
   it("keeps long phase names complete and ordered in the expanded strip", () => {
     const h = boot();
@@ -436,11 +502,21 @@ describe("reachable controls and tool fallback", () => {
     ]);
     send(h, { status: "user_paused" });
     expect(controls()[0].textContent).toBe("Resume");
-    expect(summary(h)).toContain("user paused");
+    expect(pin(h).querySelector(".run-progress-phase")!.textContent).toBe("Research · user paused");
     h.advance(60000); send(h, { status: "user_paused" });
     expect(summary(h)).toContain("12:08");
     send(h, { elapsed_ms: 729000 });
     expect(summary(h)).toContain("12:09");
+  });
+  // A halt that is not a pause keeps Pause/Stop, so these words are the only
+  // thing separating a stopped run from one that is still working.
+  it.each([
+    ["budget_limited", "Research · budget limited"],
+    ["interrupted", "Research · interrupted"],
+    ["active", "Research"],
+  ])("a collapsed pin reporting %s says so", (status, expected) => {
+    const h = boot(); send(h, { status });
+    expect(pin(h).querySelector(".run-progress-phase")!.textContent).toBe(expected);
   });
   it.each([undefined, "bad handle", " deep-research "])("disables controls for handle %s", (name) => {
     const h = boot(); send(h, { name });

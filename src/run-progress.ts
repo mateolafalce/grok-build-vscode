@@ -137,6 +137,10 @@ export interface RunProgressUpdate {
   phase: string;
   /** One-line status (last_event + detail, deliverable title, …). */
   detail?: string;
+  /** Source-preserving workflow content. Null means supplied but no content;
+   * absence means an older host whose `detail` has lost field provenance.
+   * Keep `detail` unchanged for older clients; they ignore this extra field. */
+  workflowContent?: { resultSummary: string | null; pauseMessage: string | null };
   /**
    * 0–1 COMPLETION when known — goals only.
    *
@@ -324,6 +328,7 @@ function parseWorkflow(u: Record<string, unknown>, sessionUpdate: string): RunPr
     subtitle: objective,
     phase,
     detail: detailParts.join(" · ") || undefined,
+    workflowContent: { resultSummary: resultSummary || null, pauseMessage: pauseMsg || null },
     agentsUsed,
     agentBudget,
     phases: Array.isArray(u.phases) ? u.phases.flatMap((value) => {

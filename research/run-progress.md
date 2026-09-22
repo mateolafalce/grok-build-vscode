@@ -67,6 +67,11 @@ remain unknown during a live run except for its current position; successful
 completion marks them done. The retained current phase cannot mark a terminal run's step active;
 failed/cancelled runs preserve pending steps instead of claiming they finished.
 
+The expanded card orders purpose, progress (strip, elapsed time, receipt,
+pause reason and spend), labelled markdown Output when present, then roster.
+The collapsed pin retains the phase name alone; expanded views do not repeat
+phase or status in the heading. Output uses the same `renderMarkdown`, direction
+handling and link interception as message bodies, including underscore emphasis.
 This summary renders notification metadata, not the contents of a report file.
 Workflow definitions and artifact generation live in the CLI, not this repo.
 Assistant prose arrives independently through `messageChunk`, and file reads
@@ -86,6 +91,20 @@ allows; unit tests pin the pure parsers against synthetic shapes derived from
 binary field names + user-guide semantics.
 
 ## Reload and older hosts
+
+`workflowContent: { resultSummary: string | null, pauseMessage: string | null }`
+preserves CLI field provenance across the host/client boundary. Null is explicit
+absence; a missing object identifies legacy hosts by capability, not version.
+The existing `detail`, status values and completion flags stay unchanged for
+older receivers. `src/protocol.ts` carries `RunProgressUpdate`; the relay mirror
+forwards the message. The previous renderer reads only known properties and
+ignores `workflowContent`, so this adds no new enum value or default-branch risk.
+
+New clients never treat legacy `detail` as output: it irreversibly mixes event
+prose, pause messages and results. They omit that ambiguous line while retaining
+structured purpose, progress, elapsed time, receipt, spend and roster. The client
+can deploy first, but reliable output display requires the updated host. No
+delimiter splitting or diagnostic keyword guessing is used.
 
 The relay forwards the host snapshot; it does not read the CLI workflow store.
 `GrokSidebar.emit` buffers normalized `runProgress` messages.
@@ -108,3 +127,34 @@ synthetic second-run fields. Regression stale notifications are constructed,
 not claimed as a capture. Direct access to the affected Sprite was denied
 (EACCES) during this repair, so the exact last notification in its store has
 not been independently read.
+
+## Result provenance (source audit, 2026-09-22)
+
+Audited upstream commit `4247f661689354b831191f11eeeac8424993fe3d`:
+
+- [tracker.rs, apply_outcome and summarize_result](https://github.com/xai-org/grok-build/blob/4247f661689354b831191f11eeeac8424993fe3d/crates/codegen/xai-grok-shell/src/session/workflow/tracker.rs#L493):
+  only `WorkflowOutcome::Completed { result }` assigns `result_summary`.
+  Strings pass through; null becomes `done`; an object with a string `report`
+  becomes that report plus an optional `_Full report: path_` footer; other values
+  are JSON-serialized. The result is capped at 16 KiB on a UTF-8 boundary.
+  Resume clears it. It is the workflow's completion value, not intrinsically
+  the last agent's response.
+- [deep_research.rhai](https://github.com/xai-org/grok-build/blob/4247f661689354b831191f11eeeac8424993fe3d/crates/codegen/xai-grok-shell/src/session/workflows/deep_research.rhai#L518)
+  builds a chat report, prefixes the partial-status markdown, writes the full
+  report, and calls `complete` with `report`, `path`, `status` and claim ids.
+- [notify.rs, build_workflow_updated](https://github.com/xai-org/grok-build/blob/4247f661689354b831191f11eeeac8424993fe3d/crates/codegen/xai-grok-shell/src/session/workflow/notify.rs#L106)
+  sends `result_summary` separately from `last_event` / `last_event_detail` and
+  `pause_message`. The tracker records `workflow_outcome_ignored` with detail
+  `ignored cancelled while status is cancelled`; our `eventLabel` creates the
+  English prefix `Workflow outcome ignored:`. This is event history, not output.
+
+`workflowOutputText` displays prose or string fields `report`, `summary`, or
+`sentence` from a JSON object, in that priority. This is a bounded presentation
+policy for known human-facing fields, not a universal workflow result schema.
+Other JSON values, machine-only objects, truncated JSON, JSON fences, empty
+strings and the CLI's `done` sentinel produce no output block. Unrecognized
+object fields are intentionally omitted. The CLI conflates a literal `done`
+result with null; the card omits both rather than repeating its status.
+
+`test/fixtures/workflow-output.json` reconstructs the three owner transcriptions
+with source-verified field placement; it is labelled synthetic, not a capture.
