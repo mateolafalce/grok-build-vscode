@@ -10,7 +10,7 @@
  * fallback rather than failing anything.
  */
 import { describe, expect, it } from "vitest";
-import { bootWebview } from "./webview-harness";
+import { bootWebview, click } from "./webview-harness";
 
 function render(md: string): string {
   const h = bootWebview({ ready: true });
@@ -51,6 +51,72 @@ describe("shared markdown renderer (window.__grokRenderMarkdown)", () => {
     const html = render('<img src=x onerror="alert(1)">\n');
     expect(html).not.toContain("<img");
     expect(html).toContain("&lt;img");
+  });
+
+  it("turns a Pull request line into a chip that opens that PR", () => {
+    const html = render(
+      "Done.\n\nPull request: https://github.com/lines-frlp-utn/byo-kv-cache/pull/16\n",
+    );
+    expect(html).toContain('class="pr-open"');
+    expect(html).toContain('href="https://github.com/lines-frlp-utn/byo-kv-cache/pull/16"');
+    expect(html).toContain("PR #16");
+    expect(html).toContain("lines-frlp-utn/byo-kv-cache");
+    expect(html).not.toContain("Pull request:");
+  });
+
+  it("chips a bare GitHub pull URL on its own line, and a bold label", () => {
+    const bare = render("https://github.com/acme/widgets/pull/82\n");
+    expect(bare).toContain('href="https://github.com/acme/widgets/pull/82"');
+    expect(bare).toContain("PR #82");
+    const bold = render("**Pull request:** https://github.com/acme/widgets/pull/3\n");
+    expect(bold).toContain("PR #3");
+    expect(bold).not.toContain("**");
+  });
+
+  it("asks the host to open the pull request when the chip is clicked", () => {
+    const h = bootWebview({ ready: true });
+    const html = String(
+      (h.window as any).__grokRenderMarkdown(
+        "Pull request: https://github.com/acme/widgets/pull/82\n",
+      ),
+    );
+    const host = h.doc.createElement("div");
+    host.innerHTML = html;
+    h.doc.body.appendChild(host);
+    click(h.window, host.querySelector("a.pr-open")!);
+    expect(h.posted).toContainEqual({
+      type: "openUrl",
+      url: "https://github.com/acme/widgets/pull/82",
+    });
+  });
+
+  it("chips a pull URL inside a sentence and leaves the surrounding words", () => {
+    const sentence = render(
+      "El PR ya está abierto: https://github.com/lines-frlp-utn/byo-kv-cache/pull/17\n",
+    );
+    expect(sentence).toContain("El PR ya está abierto:");
+    expect(sentence).toContain('class="pr-open"');
+    expect(sentence).toContain("PR #17");
+    expect(sentence).toContain('href="https://github.com/lines-frlp-utn/byo-kv-cache/pull/17"');
+    expect(sentence).not.toContain(">https://github.com/lines-frlp-utn/byo-kv-cache/pull/17<");
+  });
+
+  it("links a bare http address and keeps sentence punctuation outside the href", () => {
+    const html = render("Notas en https://example.com/docs.\n");
+    expect(html).toContain('href="https://example.com/docs"');
+    expect(html).toContain(">https://example.com/docs</a>.");
+    expect(html).not.toContain("pr-open");
+  });
+
+  it("leaves a pull URL inside a fence, a code span, or a named link as-is", () => {
+    const fenced = render("```\nPull request: https://github.com/acme/widgets/pull/82\n```\n");
+    expect(fenced).not.toContain("pr-open");
+    const code = render("El id es `https://github.com/acme/widgets/pull/82` en el log.\n");
+    expect(code).not.toContain("pr-open");
+    expect(code).toContain("<code>https://github.com/acme/widgets/pull/82</code>");
+    const linked = render("[#82](https://github.com/acme/widgets/pull/82)\n");
+    expect(linked).not.toContain("pr-open");
+    expect(linked).toContain('href="https://github.com/acme/widgets/pull/82"');
   });
 
   it("survives a null or undefined body without throwing", () => {
