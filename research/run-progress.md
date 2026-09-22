@@ -53,7 +53,15 @@ A live transcript entry is a non-expandable name/status marker. The pinned card
 shows static dots from the reported phases, current phase, reported elapsed time,
 and `updated Ns ago` from frame arrival. Its expanded view adds labelled phases,
 agent budget and single-line agent summaries. Pause/Resume and Stop stay outside
-the disclosure. A finished run replaces its marker with an expandable report.
+the disclosure. A finished run (`complete` or `completed`, including a Partial
+result summary) leaves the pin and replaces its marker with an expandable
+summary. The retained current phase cannot mark a terminal run's step active;
+failed/cancelled runs preserve pending steps instead of claiming they finished.
+
+This summary renders notification metadata, not the contents of a report file.
+Workflow definitions and artifact generation live in the CLI, not this repo.
+Assistant prose arrives independently through `messageChunk`, and file reads
+through tool calls; neither is required for the workflow card to finish.
 
 Receipt arrival, token increases and reported state transitions remain separate
 facts. Duplicate frames refresh only receipt age. Zero tokens do not establish

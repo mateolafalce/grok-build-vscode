@@ -101,11 +101,26 @@ try {
       await header.locator("button").click();
       assert.equal(await phase.evaluate(el => getComputedStyle(el).clipPath), "none");
       assert.equal((await checkLayout()).overflow, false);
+      await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", { data: {
+        type: "runProgress", update: {
+          kind: "workflow", id: "header-check", displayName: "deep-research", phase: "complete",
+          currentPhase: "Report", elapsedMs: 390000, done: true, detail: "Partial · 6 of 16 agents used",
+          phases: ["Plan", "Research", "Verify", "Report"].map(title => ({ title, state: title === "Report" ? "active" : "done" })),
+        },
+      } })));
+      assert.equal(await page.locator(".workflow-pin, .workflow-marker, .run-progress-btn").count(), 0);
+      const report = page.locator(".workflow-report");
+      assert.equal(await report.locator("summary").textContent(), "deep-research · done");
+      await report.locator("summary").click();
+      assert.equal(await report.locator('.workflow-phase[data-state="done"]').count(), 4);
+      assert.equal(await report.locator('[aria-current="step"]').count(), 0);
+      assert.match(await report.innerText(), /Partial · 6 of 16 agents used/);
+      assert.match(await report.locator(".workflow-phase").last().evaluate(el => getComputedStyle(el, "::before").content), /✓/);
       await page.close();
       passed++;
     }
   }
-  console.log(`${passed} phone header layout/paint and agent text cases passed (320/390px, dark/light, fallback/translucent/opaque fills)`);
+  console.log(`${passed} phone header layout/paint, agent text and completion cases passed (320/390px, dark/light, fallback/translucent/opaque fills)`);
 } finally {
   await browser.close();
 }

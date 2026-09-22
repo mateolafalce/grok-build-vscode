@@ -7233,7 +7233,7 @@
     let html = "";
     if (opts.icon) html += `<span class="rail-head-icon">${opts.icon}</span>`;
     html += `<span class="rail-head-title"></span>`;
-    html += `<span class="rail-head-twisty">${opts.open ? ICON.chevronDown : ICON.chevronRight}</span>`;
+    html += `<span class="rail-head-twisty" aria-hidden="true">${opts.open ? ICON.chevronDown : ICON.chevronRight}</span>`;
     btn.innerHTML = html;
     btn.querySelector(".rail-head-title").textContent = opts.title;
     btn.disabled = !!opts.forcedOpenBySearch;
@@ -13902,13 +13902,19 @@
     const ids = reference ? phases.filter((p) => p.id === reference) : [];
     const matches = u.currentPhaseId || ids.length ? ids : phases.filter((p) => reference && p.title === reference);
     for (const phase of phases) {
-      const current = matches.length === 1 ? phase === matches[0] : !reference && phase.state === "active";
-      const phaseState = current ? "active" : phase.state || "unknown";
+      const atPosition = matches.length === 1 ? phase === matches[0] : !reference && phase.state === "active";
+      const reportedTerminal = /^(done|complete|completed|failed|cancelled|stopped)$/.test(phase.state || "");
+      const current = !u.done && !reportedTerminal && atPosition;
+      // current_phase survives completion. It locates the final step; it must
+      // not revive it, nor leave an active step in a terminal transcript card.
+      const phaseState = u.done && !reportedTerminal && (atPosition || phase.state === "active")
+        ? u.failed ? "failed" : u.cancelled ? "cancelled" : "done"
+        : current ? "active" : phase.state || "unknown";
       for (const [parent, className, label, tag] of [[strip, "workflow-phase", phase.title, "li"], [dots, "workflow-dot", "", "span"]]) {
         const item = workflowText(parent, className, label, tag);
         item.dataset.state = phaseState;
         if (phase.id) item.dataset.phaseId = phase.id;
-        item.title = `${phase.title}: ${current ? "current" : phase.state || "state unavailable"}`;
+        item.title = `${phase.title}: ${current ? "current" : phaseState === "unknown" ? "state unavailable" : phaseState}`;
         item.setAttribute("aria-label", item.title);
         if (current) item.setAttribute("aria-current", "step");
       }

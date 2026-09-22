@@ -23,6 +23,26 @@ function replay() {
 const text = (h: Harness, selector: string) => h.doc.querySelector(selector)?.textContent ?? "";
 
 describe("the captured workflow lifecycle", () => {
+  // Synthetic completion extends the captured start/pause/cancel vocabulary;
+  // the capture itself never reached Report.
+  it.each([false, true])("settles a complete rollup and rejects an older active revision (replay %s)", (historical) => {
+    const h = replay();
+    dispatch(h.window, { type: "historyReplay", active: historical });
+    h.frame(0);
+    const finish = { ...frames[6], revision: 8, status: "complete", current_phase: "Report",
+      phases: frames[0].phases.map((p: { title: string }) => ({ ...p, state: "done" })),
+      result_summary: "Partial", agents_used: 6, agent_budget: 16, elapsed_ms: 390000,
+    };
+    dispatch(h.window, { type: "runProgress", update: parseRunProgressUpdate(finish) });
+    h.frame(2);
+    dispatch(h.window, { type: "historyReplay", active: false });
+    expect(h.doc.querySelector(".workflow-pin, .workflow-marker, [aria-current=step]")).toBeNull();
+    expect(text(h, ".workflow-report-toggle")).toBe("deep-research · done");
+    expect(text(h, ".workflow-card .run-progress-elapsed")).toBe("6:30");
+    expect(text(h, ".workflow-card .run-progress-detail")).toBe("Report · Partial · 6 of 16 agents used");
+    expect(h.doc.querySelectorAll('.workflow-phase[data-state="done"]')).toHaveLength(4);
+  });
+
   it("preserves observed fields, including the zero-token cancelled agent", () => {
     const updates = frames.map(parseRunProgressUpdate);
     expect(updates.every(Boolean)).toBe(true);

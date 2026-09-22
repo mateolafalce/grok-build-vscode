@@ -32,6 +32,38 @@ const expand = (h: Harness) => click(h.window, pin(h).querySelector(".workflow-p
 const hidden = (el: Element | null) => !!el?.hasAttribute("hidden");
 
 describe("approved workflow states", () => {
+  it.each([{}, { vscode: true }, { remote: true }])("settles complete runs into history on surface %j", (options) => {
+    const h = boot(options);
+    send(h, { current_phase: "Report" });
+    expand(h);
+    const original = card(h);
+    send(h, { status: "complete", current_phase: "Report", result_summary: "Partial",
+      phases: base.phases.map((p) => ({ ...p, state: p.title === "Report" ? "active" : "done" })),
+    });
+    expect(h.doc.querySelector(".workflow-pin")).toBeNull();
+    expect(card(h)).toBe(original);
+    expect(card(h).querySelector("summary")?.textContent).toBe("deep-research · done");
+    expect(card(h).querySelector(".workflow-marker, .run-progress-btn, [aria-current]")).toBeNull();
+    expect([...card(h).querySelectorAll(".workflow-phase")].map((p) => p.getAttribute("data-state")))
+      .toEqual(["done", "done", "done", "done"]);
+    expect(card(h).textContent).toContain("Partial");
+  });
+
+  it.each(["done", "complete", "completed"])("preserves reported %s for the retained current phase", (state) => {
+    const h = boot();
+    send(h, { status: "completed", phases: [{ title: "Research", state }] });
+    const step = card(h).querySelector(".workflow-phase")!;
+    expect(step.getAttribute("data-state")).toBe(state);
+    expect(step.hasAttribute("aria-current")).toBe(false);
+  });
+
+  it.each(["failed", "cancelled"])("ends active phase styling on %s without completing pending work", (status) => {
+    const h = boot(); send(h); send(h, { status });
+    expect([...card(h).querySelectorAll(".workflow-phase")].map((p) => p.getAttribute("data-state")))
+      .toEqual(["done", status, "pending", "pending"]);
+    expect(card(h).querySelector("[aria-current]")).toBeNull();
+  });
+
   it.each([{}, { vscode: true }, { remote: true }])("starts collapsed with reported dots on surface %j", (options) => {
     const h = boot(options);
     expect(h.doc.querySelector(".workflow-pin")).toBeNull();

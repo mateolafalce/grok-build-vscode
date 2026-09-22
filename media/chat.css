@@ -637,6 +637,10 @@ body.rail-resizing * {
 }
 .rail-chevron svg { width: 12px; height: 12px; }
 .rail-twisty { cursor: inherit; pointer-events: none; }
+@media (hover: none), (pointer: coarse) {
+  .rail-head-btn { min-height: 36px; }
+  .rail-repo-head { min-height: max(36px, var(--rail-repo-min-height)); }
+}
 /* One hue, every surface that draws the project's mark: the rail, the
    composer chip, the switcher rows and the file panel's title. The marks are
    currentColor, so tinting the host is the whole mechanism. On the chip the
@@ -2794,8 +2798,10 @@ body.thinking-hidden .msg.thinking { display: none; }
 .workflow-phase[data-state="active"] { color: var(--vscode-foreground); border-color: var(--vscode-charts-blue, #3794ff); }
 .workflow-phase[data-state="active"]::before { content: "› "; }
 .workflow-phase[data-state="done"]::before,
+.workflow-phase[data-state="complete"]::before,
 .workflow-phase[data-state="completed"]::before { content: "✓ "; }
 .workflow-phase[data-state="done"],
+.workflow-phase[data-state="complete"],
 .workflow-phase[data-state="completed"] { border-color: var(--vscode-charts-green, #4ec9b0); }
 /* Name, steps and stage on the left; elapsed and the chevron on the right; the
    controls on their OWN row at the foot of the card. Pause and Stop used to

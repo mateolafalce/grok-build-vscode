@@ -112,6 +112,13 @@ describe("parseRunProgressUpdate — workflow", () => {
       expect(paused?.cancelled).toBe(false);
     });
 
+    it.each(["complete", "completed"])("recognizes %s with a retained Report position and Partial result", (status) => {
+      expect(at({ status, current_phase: "Report", result_summary: "Partial" })).toMatchObject({
+        phase: status, currentPhase: "Report", done: true, failed: false, cancelled: false,
+        detail: "Report · Partial · 1 of 128 agents used",
+      });
+    });
+
     it("catches lifecycle words we have not seen, on their stems", () => {
       // The CLI's own vocabulary nearby: budget_limited, interrupted, failed.
       // Each must outrank the position the same way a measured one does.

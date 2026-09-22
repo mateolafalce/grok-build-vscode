@@ -100,6 +100,7 @@ const LIFECYCLE_STATUS = /paus|cancel|stopp|stopped|complet|fail|error|interrupt
 
 /** Terminal-ish phases that stop the live dots. */
 const DONE_PHASES = new Set([
+  "complete",
   "completed",
   "failed",
   "cancelled",
