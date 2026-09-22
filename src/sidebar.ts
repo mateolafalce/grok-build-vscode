@@ -4098,7 +4098,13 @@ Only continue if you trust this code.`,
                   req.options.find((o) => o.kind === "allow_once");
       if (opt) { client.respondPermission(req.id, opt.optionId); return; }
     }
-    const execute = String(req.toolCall?.kind ?? "").toLowerCase() === "execute";
+    // This flag engages the HOST's own command grants, which replace the CLI's
+    // persistent choice with ours. Muse answers a session-scoped grant itself
+    // and never reaches `allowedCommandPrograms` below, so there the machinery
+    // would remove a choice that works and offer one that resolves to a single
+    // allow. Plan gating re-reads `toolCall.kind` and still applies.
+    const execute = session.provider !== "muse"
+      && String(req.toolCall?.kind ?? "").toLowerCase() === "execute";
     const command = (req.toolCall?.rawInput as { command?: unknown } | undefined)?.command;
     const programs = execute && typeof command === "string"
       ? commandProgramsForGrant(command, resolvedTerminalShellDialect()) : undefined;
