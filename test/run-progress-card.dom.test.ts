@@ -49,7 +49,7 @@ describe("approved workflow states", () => {
     expect(pin(h).querySelector(".workflow-pin-toggle")!.getAttribute("aria-expanded")).toBe("false");
     expect(summary(h)).toContain("deep-research");
     expect(summary(h)).toContain("Research");
-    expect(summary(h)).toContain("12:08");
+    expect(pin(h).querySelector(".run-progress-elapsed")!.textContent).toBe("12:08");
     expect(receipt(h)).toBe("updated 0s ago");
     const dots = [...pin(h).querySelectorAll(".workflow-dot")];
     expect(dots).toHaveLength(4);
@@ -60,6 +60,36 @@ describe("approved workflow states", () => {
     expect(pin(h).querySelector(".workflow-motion, .blink-dots")).toBeNull();
     expect(card(h).textContent).toBe("deep-research \u00b7 running");
     expect(card(h).querySelector("button, summary, details, [role=button], [aria-expanded]")).toBeNull();
+  });
+  it.each([{}, { vscode: true }, { remote: true }])("shows the header stage only while collapsed on surface %j", (options) => {
+    const h = boot(options);
+    const style = h.doc.createElement("style");
+    style.textContent = readFileSync(new URL("../media/chat.css", import.meta.url), "utf8");
+    h.doc.head.append(style);
+    send(h);
+    const phase = () => pin(h).querySelector(".workflow-heading .run-progress-phase")!;
+    const phaseStyle = () => h.window.getComputedStyle(phase() as any);
+    expect(phase().textContent).toBe("· Research");
+    expect(phaseStyle().position).not.toBe("absolute");
+    expect(phaseStyle().clipPath).not.toBe("inset(50%)");
+    expand(h);
+    expect(phaseStyle().position).toBe("absolute");
+    expect(phaseStyle().clipPath).toBe("inset(50%)");
+    expect(phaseStyle().width).toBe("1px");
+    expect(phaseStyle().height).toBe("1px");
+    // Visually hidden, still available to assistive technology.
+    expect(phase().textContent).toBe("· Research");
+    expect(phase().hasAttribute("aria-hidden")).toBe(false);
+    expect(phaseStyle().display).not.toBe("none");
+    expect(hidden(pin(h).querySelector(".workflow-phases"))).toBe(false);
+    send(h, { current_phase: "Verify", elapsed_ms: 106_000 });
+    expect(phase().textContent).toBe("· Verify");
+    expect(phaseStyle().clipPath).toBe("inset(50%)");
+    expect(pin(h).querySelector(".run-progress-elapsed")!.textContent).toBe("1:46");
+    expand(h);
+    expect(phase().textContent).toBe("· Verify");
+    expect(phaseStyle().position).not.toBe("absolute");
+    expect(phaseStyle().clipPath).not.toBe("inset(50%)");
   });
   it("shows one line per agent and toggles each detail independently", () => {
     const h = boot();

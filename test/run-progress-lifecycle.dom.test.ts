@@ -59,7 +59,7 @@ describe("the captured workflow lifecycle", () => {
     const h = replay(); frames.forEach((_, i) => h.frame(i));
     expect(h.doc.querySelector(".workflow-pin")).toBeNull();
     expect(text(h, ".workflow-card .run-progress-phase")).toBe("· Plan · cancelled");
-    expect(text(h, ".workflow-card .run-progress-elapsed")).toBe("· 0:00");
+    expect(text(h, ".workflow-card .run-progress-elapsed")).toBe("0:00");
     expect(text(h, ".workflow-agent-state")).toContain("reported cancelled");
     expect(h.doc.querySelector(".workflow-card")!.classList.contains("run-progress-cancelled")).toBe(true);
     expect(h.doc.querySelectorAll(".workflow-card .run-progress-btn")).toHaveLength(0);

@@ -13874,7 +13874,7 @@
     el.querySelector(".run-progress-phase").textContent = position || lifecycle ? `· ${position || status}${position && lifecycle ? ` · ${status}` : ""}` : "";
     const elapsed = el.querySelector(".run-progress-elapsed");
     elapsed.hidden = !Number.isFinite(u.elapsedMs);
-    elapsed.textContent = elapsed.hidden ? "" : `· ${workflowElapsed(u.elapsedMs)}`;
+    elapsed.textContent = elapsed.hidden ? "" : workflowElapsed(u.elapsedMs);
     elapsed.title = "Reported workflow elapsed time; advances only when reported";
 
     // Sits beside the receipt rather than inside the disclosure: "updated 3s
