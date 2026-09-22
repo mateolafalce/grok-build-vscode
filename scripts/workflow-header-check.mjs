@@ -116,6 +116,23 @@ try {
       assert.equal(await report.locator('[aria-current="step"]').count(), 0);
       assert.match(await report.innerText(), /Partial · 6 of 16 agents used/);
       assert.match(await report.locator(".workflow-phase").last().evaluate(el => getComputedStyle(el, "::before").content), /✓/);
+      // A run that stopped mid-stage must not paint the interrupted step
+      // the same hollow ○ as a step that was never reached.
+      await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", { data: {
+        type: "runProgress", update: {
+          kind: "workflow", id: "header-check-2", displayName: "deep-research", phase: "failed",
+          currentPhase: "Research", elapsedMs: 90000, done: true, failed: true,
+          phases: ["Plan", "Research", "Verify", "Report"].map(title => ({ title, state: title === "Plan" ? "done" : title === "Research" ? "active" : "pending" })),
+        },
+      } })));
+      const failedReport = page.locator(".workflow-report").last();
+      await failedReport.locator("summary").click();
+      const interrupted = failedReport.locator(".workflow-phase").nth(1);
+      const pending = failedReport.locator(".workflow-phase").nth(2);
+      assert.match(await interrupted.evaluate(el => getComputedStyle(el, "::before").content), /✕/);
+      const interruptedColor = await interrupted.evaluate(el => getComputedStyle(el).color);
+      const pendingColor = await pending.evaluate(el => getComputedStyle(el).color);
+      assert.notEqual(interruptedColor, pendingColor, "an interrupted step must not read identically to one never reached");
       await page.close();
       passed++;
     }

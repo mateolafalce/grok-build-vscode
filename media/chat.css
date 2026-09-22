@@ -2803,6 +2803,12 @@ body.thinking-hidden .msg.thinking { display: none; }
 .workflow-phase[data-state="done"],
 .workflow-phase[data-state="complete"],
 .workflow-phase[data-state="completed"] { border-color: var(--vscode-charts-green, #4ec9b0); }
+/* A stage that was active when a run stopped or failed must not look
+   like a stage that was never reached (○, identical to pending). */
+.workflow-phase[data-state="failed"]::before { content: "✕ "; }
+.workflow-phase[data-state="failed"] { border-color: var(--vscode-errorForeground); color: var(--vscode-errorForeground); }
+.workflow-phase[data-state="cancelled"]::before { content: "› "; }
+.workflow-phase[data-state="cancelled"] { opacity: 0.7; }
 /* Name, steps and stage on the left; elapsed and the chevron on the right; the
    controls on their OWN row at the foot of the card. Pause and Stop used to
    share this row, which clipped "Stop" off the right edge of a phone, and the
@@ -2844,7 +2850,9 @@ body.thinking-hidden .msg.thinking { display: none; }
 .workflow-dots { display: inline-flex; flex-wrap: wrap; gap: 5px; align-items: center; }
 .workflow-dot { width: 7px; height: 7px; border: 1px solid currentColor; border-radius: 50%; opacity: 0.45; }
 .workflow-dot[data-state="unknown"] { border-style: dashed; }
-.workflow-dot[data-state="done"], .workflow-dot[data-state="completed"] { background: var(--vscode-charts-green, #4ec9b0); border-color: var(--vscode-charts-green, #4ec9b0); opacity: 1; }
+.workflow-dot[data-state="done"], .workflow-dot[data-state="complete"], .workflow-dot[data-state="completed"] { background: var(--vscode-charts-green, #4ec9b0); border-color: var(--vscode-charts-green, #4ec9b0); opacity: 1; }
+.workflow-dot[data-state="failed"] { background: var(--vscode-errorForeground); border-color: var(--vscode-errorForeground); opacity: 1; }
+.workflow-dot[data-state="cancelled"] { opacity: 0.7; }
 .workflow-dot[aria-current="step"] { border: 2px solid var(--vscode-charts-blue, #3794ff); opacity: 1; }
 /* A row, so the icon sits beside the name the way a tool line's does, and
    the ellipsis lands on the text rather than clipping the icon off. */
