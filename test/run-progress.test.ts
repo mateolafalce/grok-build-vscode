@@ -1,6 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { readWorkflowCompletion } from "../src/workflow-state";
+import { GrokSidebar } from "../src/sidebar";
+import { Session } from "../src/session";
+import { bracketRemoteSnapshot } from "../src/remote-policy";
 import {
   isRunProgressUpdate,
   parseRunProgressUpdate,
@@ -11,6 +14,58 @@ import {
 
 const statelessRuns = JSON.parse(readFileSync(new URL("fixtures/workflow-stateless-phases.json", import.meta.url), "utf8")).runs;
 const outputRuns = JSON.parse(readFileSync(new URL("fixtures/workflow-output.json", import.meta.url), "utf8")).runs;
+
+describe("buffered workflow repairs", () => {
+  it("replaces the latest frame in place and delivers the repair once to attached views", () => {
+    const sidebar = Object.create(GrokSidebar.prototype) as any;
+    const session = new Session();
+    const run = statelessRuns[0];
+    const update = parseRunProgressUpdate({ ...run.state, sessionUpdate: "workflow_updated",
+      run_id: run.run_id, name: run.name, status: "active" })!;
+    const completed = readWorkflowCompletion("session", update, () => JSON.stringify(run.state))!;
+    sidebar.focused = session;
+    sidebar.workflowCompletion = (_session: Session, previous: typeof update) =>
+      readWorkflowCompletion("session", previous, () => JSON.stringify(run.state));
+    const desk = vi.fn();
+    sidebar.view = { webview: { postMessage: desk } };
+    sidebar.mirrorToProjectsRail = () => {};
+    sidebar.sendRemoteSession = vi.fn();
+    const before = { type: "userMessage" as const, text: "before" };
+    const after = { type: "userMessage" as const, text: "after" };
+    session.buffer.push(before, { type: "runProgress", update }, after);
+    sidebar.refreshWorkflowCompletions(session);
+    sidebar.refreshWorkflowCompletions(session);
+    expect({ buffer: session.buffer, desk: desk.mock.calls, remote: sidebar.sendRemoteSession.mock.calls })
+      .toEqual({ buffer: [before, { type: "runProgress", update: completed }, after],
+        desk: [[{ type: "runProgress", update: completed, replaceOnly: true }]],
+        remote: [[session, { type: "runProgress", update: completed, replaceOnly: true }]] });
+  });
+
+  it("keeps repairs outside a trimmed phone snapshot and skips runs absent from the host buffer", () => {
+    const sidebar = Object.create(GrokSidebar.prototype) as any;
+    const session = new Session();
+    const run = statelessRuns[0];
+    const update = parseRunProgressUpdate({ ...run.state, sessionUpdate: "workflow_updated",
+      run_id: run.run_id, name: run.name, status: "active" })!;
+    sidebar.workflowCompletion = vi.fn((_session, previous) =>
+      readWorkflowCompletion("session", previous, () => JSON.stringify(run.state)));
+    sidebar.sendRemoteSession = vi.fn();
+    session.buffer.push({ type: "runProgress", update });
+    for (let i = 0; i < 11; i++) session.buffer.push({ type: "userMessage", text: `turn ${i}` });
+    sidebar.refreshWorkflowCompletions(session);
+    const snapshot = bracketRemoteSnapshot(session.buffer);
+    session.buffer = [];
+    sidebar.workflowCompletion.mockClear();
+    sidebar.sendRemoteSession.mockClear();
+    sidebar.refreshWorkflowCompletions(session);
+    expect({ snapshot, buffer: session.buffer, reads: sidebar.workflowCompletion.mock.calls,
+      deliveries: sidebar.sendRemoteSession.mock.calls }).toEqual({
+      snapshot: [{ type: "historyReplay", active: true }, { type: "historyBatch",
+        messages: Array.from({ length: 10 }, (_, i) => ({ type: "userMessage", text: `turn ${i + 1}` })) },
+      { type: "historyReplay", active: false }], buffer: [], reads: [], deliveries: [],
+    });
+  });
+});
 
 describe("workflow content provenance", () => {
   it.each(outputRuns)("preserves result provenance and the legacy detail for $run_id", (run) => {

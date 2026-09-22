@@ -18189,13 +18189,19 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
 
   private refreshWorkflowCompletions(session: Session): void {
     if (session.provider !== "grok") return;
-    const latest = new Map<string, RunProgressUpdate>();
+    const latest = new Map<string, Extract<HostMsg, { type: "runProgress" }>>();
     for (const message of session.buffer) {
-      if (message.type === "runProgress" && message.update.kind === "workflow") latest.set(message.update.id, message.update);
+      if (message.type === "runProgress" && message.update.kind === "workflow") latest.set(message.update.id, message);
     }
-    for (const update of latest.values()) {
-      const completed = this.workflowCompletion(session, update);
-      if (completed) this.emit(session, { type: "runProgress", update: completed });
+    for (const message of latest.values()) {
+      const completed = this.workflowCompletion(session, message.update);
+      if (!completed) continue;
+      // Repair the replay source at its existing position, never at the tail.
+      message.update = completed;
+      if (session.suppressContent) continue;
+      const frame: HostMsg = { type: "runProgress", update: completed, replaceOnly: true };
+      if (session === this.focused) this.postLocal(frame);
+      if (!session.replaying) this.sendRemoteSession(session, frame);
     }
   }
 

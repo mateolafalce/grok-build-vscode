@@ -19659,6 +19659,15 @@
         applyChildStream(msg);
         break;
       case "runProgress":
+        if (msg.replaceOnly) {
+          // A repair must not append a report outside this surface's window.
+          // Keep parked desk history current for a later prepend as well.
+          for (const entry of state.historyPrefix) {
+            if (entry.type === "runProgress" && entry.update.id === msg.update.id
+              && entry.update.kind === msg.update.kind) entry.update = msg.update;
+          }
+          if (!state.runProgressCards.has(String(msg.update.id))) break;
+        }
         applyRunProgress(msg.update);
         break;
       case "permissionRequest":

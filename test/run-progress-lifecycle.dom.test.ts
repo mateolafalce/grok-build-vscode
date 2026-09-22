@@ -46,7 +46,29 @@ describe("old host output compatibility", () => {
 });
 
 describe("completion without a terminal notification", () => {
-  it.each(["live", "unobserved completion", "cold replay", "browser reload"])("reconciles both CLI state files for %s and settles closed reports", (mode) => {
+  it.each(["desk", "phone"])("does not append a live repair outside the %s window", (surface) => {
+    const h = replay();
+    (h.window as any).__grokHistoryWindow = 1;
+    const update = parseRunProgressUpdate({ ...statelessRuns[0].state, sessionUpdate: "workflow_updated",
+      run_id: statelessRuns[0].run_id, name: statelessRuns[0].name, status: "active" })!;
+    dispatch(h.window, { type: "historyReplay", active: true });
+    if (surface === "desk") {
+      dispatch(h.window, { type: "userMessage", text: "Before run" });
+      dispatch(h.window, { type: "runProgress", update });
+    }
+    dispatch(h.window, { type: "userMessage", text: "After run" });
+    dispatch(h.window, { type: "historyReplay", active: false });
+    dispatch(h.window, { type: "runProgress", update: { ...update, done: true, phase: "completed" }, replaceOnly: true });
+    const visible = [...h.doc.querySelectorAll(".msg.user .body, .workflow-report-toggle")].map(el => el.textContent);
+    (h.window as any).__grokHistory.expandAll();
+    expect({ visible,
+      expanded: [...h.doc.querySelectorAll(".msg.user .body, .workflow-report-toggle")].map(el => el.textContent),
+      pin: h.doc.querySelector(".workflow-pin, .workflow-marker, .run-progress-btn"),
+    }).toEqual({ visible: ["After run"],
+      expanded: surface === "desk" ? ["Before run", "demo-stages · done", "After run"] : ["After run"], pin: null });
+  });
+
+  it.each(["live", "unobserved completion", "cold replay", "browser reload"])("repairs from disk in the middle of the transcript and replays closed reports in order (%s)", (mode) => {
     vi.useFakeTimers();
     const dir = mkdtempSync(join(tmpdir(), "workflow-state-"));
     vi.stubEnv("GROK_HOME", dir);
@@ -78,6 +100,7 @@ describe("completion without a terminal notification", () => {
       if (mode === "cold replay") writeStates();
       dispatch(h.window, { type: "historyReplay", active: mode !== "live" });
       for (const run of statelessRuns) {
+        sidebar.emit(session, { type: "userMessage", text: `Start ${run.name}` });
         // A deliberately stale notification, not a fabricated capture from the
         // affected machine. Disk state is the supplied CLI shape.
         const message = { type: "runProgress", update: parseRunProgressUpdate({ ...run.state,
@@ -86,6 +109,7 @@ describe("completion without a terminal notification", () => {
         if (mode === "browser reload") session.buffer.push(message as any);
         else sidebar.emit(session, message);
       }
+      sidebar.emit(session, { type: "userMessage", text: "Later conversation" });
       if (mode === "cold replay") {
         expect(session.buffer.filter(m => m.type === "runProgress" && m.update.done)).toHaveLength(2);
       }
@@ -112,6 +136,19 @@ describe("completion without a terminal notification", () => {
       const count = session.buffer.length;
       sidebar.refreshWorkflowCompletions(session);
       expect(session.buffer).toHaveLength(count);
+      // Replay into a fresh view so existing cards cannot hide appended repairs.
+      const restored = replay();
+      dispatch(restored.window, { type: "historyReplay", active: true });
+      for (const message of session.buffer) dispatch(restored.window, message);
+      dispatch(restored.window, { type: "historyReplay", active: false });
+      expect({
+        bufferOrder: session.buffer.map(m => m.type === "runProgress" ? `${m.update.title}: ${m.update.done}`
+          : m.type === "userMessage" ? m.text : m.type),
+        replayOrder: [...restored.doc.querySelectorAll(".msg.user .body, .workflow-report-toggle")].map(el => el.textContent),
+      }).toEqual({
+        bufferOrder: ["Start demo-stages", "demo-stages: true", "Start demo-stages-2", "demo-stages-2: true", "Later conversation"],
+        replayOrder: ["Start demo-stages", "demo-stages · done", "Start demo-stages-2", "demo-stages-2 · done", "Later conversation"],
+      });
     } finally {
       clearInterval(sidebar.workflowTimer);
       vi.useRealTimers();
