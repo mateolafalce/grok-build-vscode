@@ -16,29 +16,63 @@ const statelessRuns = JSON.parse(readFileSync(new URL("fixtures/workflow-statele
 const outputRuns = JSON.parse(readFileSync(new URL("fixtures/workflow-output.json", import.meta.url), "utf8")).runs;
 
 describe("buffered workflow repairs", () => {
-  it("replaces the latest frame in place and delivers the repair once to attached views", () => {
+  it("replaces every frame in order from the newest observation and delivers the repair once", () => {
     const sidebar = Object.create(GrokSidebar.prototype) as any;
     const session = new Session();
     const run = statelessRuns[0];
     const update = parseRunProgressUpdate({ ...run.state, sessionUpdate: "workflow_updated",
       run_id: run.run_id, name: run.name, status: "active" })!;
-    const completed = readWorkflowCompletion("session", update, () => JSON.stringify(run.state))!;
+    const latest = { ...update, revision: 42, agents: [{ label: "final writer", state: "done", tokensUsed: 12345 }] };
+    // Missing disk roster must retain the newest notification's roster/tokens.
+    const disk = JSON.stringify({ ...run.state, agents: undefined });
+    const completed = readWorkflowCompletion("session", latest, () => disk)!;
     sidebar.focused = session;
     sidebar.workflowCompletion = (_session: Session, previous: typeof update) =>
-      readWorkflowCompletion("session", previous, () => JSON.stringify(run.state));
+      readWorkflowCompletion("session", previous, () => disk);
     const desk = vi.fn();
     sidebar.view = { webview: { postMessage: desk } };
     sidebar.mirrorToProjectsRail = () => {};
     sidebar.sendRemoteSession = vi.fn();
     const before = { type: "userMessage" as const, text: "before" };
     const after = { type: "userMessage" as const, text: "after" };
-    session.buffer.push(before, { type: "runProgress", update }, after);
+    const between = { type: "userMessage" as const, text: "between observations" };
+    const other = { type: "runProgress" as const, update: { ...update, id: "wf_other", done: true } };
+    session.buffer.push(before, { type: "runProgress", update }, between, other,
+      { type: "runProgress", update: latest }, after);
     sidebar.refreshWorkflowCompletions(session);
     sidebar.refreshWorkflowCompletions(session);
     expect({ buffer: session.buffer, desk: desk.mock.calls, remote: sidebar.sendRemoteSession.mock.calls })
-      .toEqual({ buffer: [before, { type: "runProgress", update: completed }, after],
+      .toEqual({ buffer: [before, { type: "runProgress", update: completed }, between, other,
+        { type: "runProgress", update: completed }, after],
         desk: [[{ type: "runProgress", update: completed, replaceOnly: true }]],
         remote: [[session, { type: "runProgress", update: completed, replaceOnly: true }]] });
+  });
+
+  it("isolates repaired updates and their nested fields from other frames and deliveries", () => {
+    const sidebar = Object.create(GrokSidebar.prototype) as any;
+    const session = new Session();
+    const run = statelessRuns[0];
+    const update = parseRunProgressUpdate({ ...run.state, sessionUpdate: "workflow_updated",
+      run_id: run.run_id, name: run.name, status: "active" })!;
+    const completed = readWorkflowCompletion("session", update, () => JSON.stringify(run.state))!;
+    sidebar.workflowCompletion = () => completed;
+    sidebar.sendRemoteSession = vi.fn();
+    const first = { type: "runProgress" as const, update: structuredClone(update) };
+    const last = { type: "runProgress" as const, update: structuredClone(update) };
+    session.buffer.push(first, last);
+    sidebar.refreshWorkflowCompletions(session);
+    const expected = structuredClone(completed);
+    first.update.done = false;
+    first.update.agents![0].tokensUsed = -1;
+    first.update.phases![0].title = "changed phase";
+    first.update.workflowContent!.resultSummary = "changed result";
+    expect.soft({ last: last.update, delivered: sidebar.sendRemoteSession.mock.calls[0][1].update })
+      .toEqual({ last: expected, delivered: expected });
+    // Mutation in the other direction also cannot reach the first frame.
+    const firstAfterMutation = structuredClone(first.update);
+    last.update.agents!.push({ label: "another agent" });
+    last.update.phases!.push({ title: "another phase" });
+    expect.soft(first.update).toEqual(firstAfterMutation);
   });
 
   it("keeps repairs outside a trimmed phone snapshot and skips runs absent from the host buffer", () => {

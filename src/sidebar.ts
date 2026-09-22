@@ -18189,15 +18189,19 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
 
   private refreshWorkflowCompletions(session: Session): void {
     if (session.provider !== "grok") return;
-    const latest = new Map<string, Extract<HostMsg, { type: "runProgress" }>>();
+    const runs = new Map<string, Extract<HostMsg, { type: "runProgress" }>[]>();
     for (const message of session.buffer) {
-      if (message.type === "runProgress" && message.update.kind === "workflow") latest.set(message.update.id, message);
+      if (message.type !== "runProgress" || message.update.kind !== "workflow") continue;
+      const frames = runs.get(message.update.id);
+      if (frames) frames.push(message);
+      else runs.set(message.update.id, [message]);
     }
-    for (const message of latest.values()) {
-      const completed = this.workflowCompletion(session, message.update);
+    for (const frames of runs.values()) {
+      const completed = this.workflowCompletion(session, frames[frames.length - 1].update);
       if (!completed) continue;
-      // Repair the replay source at its existing position, never at the tail.
-      message.update = completed;
+      // Hydration may keep the first frame it sees. Repair every replay position
+      // from the newest observation, with independent nested data for each frame.
+      for (const message of frames) message.update = structuredClone(completed);
       if (session.suppressContent) continue;
       const frame: HostMsg = { type: "runProgress", update: completed, replaceOnly: true };
       if (session === this.focused) this.postLocal(frame);

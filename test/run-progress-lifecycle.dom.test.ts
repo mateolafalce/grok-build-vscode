@@ -46,6 +46,61 @@ describe("old host output compatibility", () => {
 });
 
 describe("completion without a terminal notification", () => {
+  it.each([80, 10])("keeps every disk-repaired frame above a %i-turn window done and unpinned after replay and scroll-up", (turns) => {
+    const dir = mkdtempSync(join(tmpdir(), "workflow-window-"));
+    vi.stubEnv("GROK_HOME", dir);
+    const h = replay();
+    (h.window as any).__grokHistoryWindow = turns;
+    const sidebar = Object.create(GrokSidebar.prototype) as any;
+    const session = new Session();
+    session.provider = "grok";
+    session.activeSessionId = "01a0c8e9-649c-7130-9515-915e62291d30";
+    sidebar.focused = session;
+    sidebar.view = { webview: { postMessage: (message: unknown) => dispatch(h.window, structuredClone(message)) } };
+    sidebar.mirrorToProjectsRail = () => {};
+    sidebar.sendRemoteSession = () => {};
+    sidebar.sessionCwd = () => dir;
+    const run = statelessRuns[0];
+    const update = parseRunProgressUpdate({ ...run.state, sessionUpdate: "workflow_updated",
+      run_id: run.run_id, name: run.name, status: "active", revision: 1 })!;
+    const later = Array.from({ length: turns }, (_, i) => `Later turn ${i}`);
+    session.buffer.push({ type: "userMessage", text: "Before run" }, { type: "runProgress", update },
+      { type: "userMessage", text: "During run" },
+      { type: "runProgress", update: { ...update, revision: 2 } },
+      ...later.map(text => ({ type: "userMessage" as const, text })));
+    const replayBuffer = () => {
+      dispatch(h.window, { type: "clearMessages" });
+      dispatch(h.window, { type: "historyReplay", active: true });
+      for (const message of session.buffer) dispatch(h.window, structuredClone(message));
+      dispatch(h.window, { type: "historyReplay", active: false });
+    };
+    try {
+      replayBuffer();
+      const folder = join(sessionDirFor(dir, dir, session.activeSessionId)!, "workflows", run.run_id);
+      mkdirSync(folder, { recursive: true });
+      writeFileSync(join(folder, "state.json"), JSON.stringify(run.state));
+      sidebar.refreshWorkflowCompletions(session);
+      // Discard the live client's replaceOnly-patched prefix, as a focus switch
+      // or reload does. Only the host buffer can make this second replay safe.
+      replayBuffer();
+      const order = () => [...h.doc.querySelectorAll(".msg.user .body, .workflow-report-toggle")].map(el => el.textContent);
+      expect({ order: order(), card: h.doc.querySelector(".workflow-card"),
+        prefix: (h.window as any).__grokHistory.prefixRemaining() })
+        .toEqual({ order: later, card: null, prefix: 2 });
+      const messages = h.doc.getElementById("messages")!;
+      Object.defineProperty(messages, "scrollHeight", { configurable: true, value: 10000 });
+      messages.dispatchEvent(new h.window.WheelEvent("wheel", { deltaY: -80, bubbles: true }));
+      messages.scrollTop = 0;
+      messages.dispatchEvent(new h.window.Event("scroll"));
+      expect({ order: order(), pin: h.doc.querySelector(".workflow-pin, .workflow-marker, .run-progress-btn, [aria-current=step]"),
+        reports: [...h.doc.querySelectorAll(".workflow-report")].map(el => (el as HTMLDetailsElement).open),
+      }).toEqual({ order: ["Before run", "demo-stages · done", "During run", ...later], pin: null, reports: [false] });
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it.each(["desk", "phone"])("does not append a live repair outside the %s window", (surface) => {
     const h = replay();
     (h.window as any).__grokHistoryWindow = 1;
