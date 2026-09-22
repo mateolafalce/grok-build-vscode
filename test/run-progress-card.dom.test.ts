@@ -199,6 +199,11 @@ describe("approved workflow states", () => {
     ["read:agents", "Read", "Read / agents"],
     ["researcher-0", "Research", "researcher-0"],
     ["research-planner", "Plan", "Plan / research-planner"],
+    // A remainder beginning with s: an earlier regex class lost its backslash
+    // and ate the letter, rendering "Report / ynthesizer".
+    ["report-synthesizer", "Report", "Report / synthesizer"],
+    ["verify:stale", "Verify", "Verify / stale"],
+    ["plan:summary", "Plan", "Plan / summary"],
   ])("names agent %s in phase %s as %s", (label, phase, expected) => {
     const h = boot();
     send(h, { agents: [{ agent_id: "a", label, phase, state: "done", tokens_used: 10 }] }); expand(h);

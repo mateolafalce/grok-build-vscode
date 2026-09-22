@@ -13789,21 +13789,29 @@
   // phase `Pick` read "pick Pick", `read:readme` in `Read` read
   // "read:readme Read". Compose ONE name -- the phase, then only what the
   // label actually adds.
+  const AGENT_NAME_SEPARATORS = " :_-/";
+
   function workflowAgentName(agent) {
     const phase = String(agent.phase || "").trim();
     const label = String(agent.label || "").trim();
     if (!phase || !label) return label || phase;
-    const bare = (s) => s.toLowerCase().replace(/[s:_/-]+/g, "");
+    // Compared and stripped with an explicit character list rather than a
+    // regex class: an earlier spelling lost its backslash and silently ate
+    // the letter s, turning `report-synthesizer` into `Report / ynthesizer`.
+    const sep = (c) => AGENT_NAME_SEPARATORS.includes(c);
+    const bare = (s) => s.toLowerCase().split("").filter((c) => !sep(c)).join("");
     if (bare(label) === bare(phase)) return phase;
     if (label.toLowerCase().startsWith(phase.toLowerCase())) {
       const tail = label.slice(phase.length);
-      const rest = tail.replace(/^[s:_/-]+/, "");
+      let i = 0;
+      while (i < tail.length && sep(tail[i])) i++;
+      const rest = tail.slice(i);
       if (!rest) return phase;
       // `read:readme` adds "readme" after a separator, so the phase leads and
       // the label contributes the rest. `researcher-0` has no separator: it
-      // already reads as its own phase, so it stands alone rather than
-      // becoming "Research / researcher-0", which is the repetition again.
-      return rest !== tail ? `${phase} / ${rest}` : label;
+      // already reads as its own phase and stands alone, because
+      // "Research / researcher-0" is the repetition again.
+      return i > 0 ? `${phase} / ${rest}` : label;
     }
     return `${phase} / ${label}`;
   }
