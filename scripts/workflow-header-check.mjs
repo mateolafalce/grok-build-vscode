@@ -18,7 +18,7 @@ let passed = 0;
 try {
   for (const width of [320, 390]) for (const theme of ["dark", "light"]) {
     for (const tint of ["initial", "rgba(127, 127, 127, 0.18)", "#304050"]) {
-      const page = await browser.newPage({ viewport: { width, height: 844 } });
+      const page = await browser.newPage({ viewport: { width, height: 844 }, hasTouch: true });
       await page.setContent(`<!doctype html><html data-theme="${theme}"><head>
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>${palette}${light}${read("media/chat.css")}
@@ -43,15 +43,29 @@ try {
         },
       } })));
       const header = page.locator(".workflow-pin-run > .workflow-heading");
+      const checkDisclosure = async (button, selector, open) => {
+        const icon = button.locator(selector);
+        assert.equal(await icon.locator("svg path").getAttribute("d"), open ? "m6 9 6 6 6-6" : "m9 18 6-6-6-6");
+        assert.equal(await icon.getAttribute("aria-hidden"), "true");
+        assert.equal(await icon.locator("svg").evaluate(el => getComputedStyle(el).width), "12px");
+        assert.equal(await icon.locator("svg").evaluate(el => getComputedStyle(el).height), "12px");
+        assert.ok((await button.boundingBox()).height >= 36, "disclosure needs the existing 36px touch target");
+        assert.equal(await icon.evaluate(el => getComputedStyle(el, "::before").content), "none");
+        assert.equal(await button.evaluate(el => getComputedStyle(el, "::after").content), "none");
+      };
+      await checkDisclosure(header.locator("button"), ".workflow-chevron", false);
       const phase = header.locator(".run-progress-phase");
       assert.equal(await phase.textContent(), "· Verify");
       assert.equal(await phase.evaluate(el => getComputedStyle(el).clipPath), "none");
       assert.equal(await header.locator(".run-progress-elapsed").textContent(), "1:46");
       await header.locator("button").click();
+      await checkDisclosure(header.locator("button"), ".workflow-chevron", true);
       assert.equal(await phase.evaluate(el => getComputedStyle(el).clipPath), "inset(50%)");
       const rows = page.locator(".workflow-pin-run .workflow-agent");
       for (const row of await rows.all()) {
+        await checkDisclosure(row.locator("button"), ".workflow-agent-chevron", false);
         await row.locator("button").click();
+        await checkDisclosure(row.locator("button"), ".workflow-agent-chevron", true);
         assert.doesNotMatch(await row.locator(".workflow-agent-activity").innerText(), /no token activity observed/,
           "a positive token total must not appear beside a no-activity claim");
         assert.doesNotMatch(await row.locator(".workflow-agent-state").innerText(), /reported/,
@@ -133,6 +147,28 @@ try {
       const interruptedColor = await interrupted.evaluate(el => getComputedStyle(el).color);
       const pendingColor = await pending.evaluate(el => getComputedStyle(el).color);
       assert.notEqual(interruptedColor, pendingColor, "an interrupted step must not read identically to one never reached");
+      // The standalone editor rail has its own stylesheet and renderer.
+      // Check its real controls too; chat.css cannot fix that webview.
+      await page.setContent(`<style>${palette}${read("media/projects-rail.css")}</style>
+        <aside id="projects-rail"><input id="rail-search"><div id="rail-scroll"></div></aside>`);
+      for (const script of ["webview-helpers", "repo-icons", "repo-icon-picker", "projects-rail"]) {
+        await page.addScriptTag({ content: read(`media/${script}.js`) });
+      }
+      await page.evaluate(() => window.__grokProjectsRail.onMessage({ type: "repos",
+        entries: [{ cwd: "/work/demo", label: "demo", available: true, updatedAt: 1 }],
+        selectedCwd: "/work/demo", activeCwd: "/work/demo",
+      }));
+      await page.evaluate(() => window.__grokProjectsRail.onMessage({ type: "sessions",
+        entries: [{ id: "demo-session", cwd: "/work/demo", displayName: "Demo", numMessages: 2, updatedAt: 1, createdAt: 1 }],
+        activeId: null, dots: {}, offset: 0, total: 1, hasMore: false, nextOffset: 1, query: "",
+      }));
+      for (const selector of [".rail-head-btn", ".rail-repo-head"]) {
+        const buttons = await page.locator(selector).all();
+        assert.ok(buttons.length > 0, `${selector} must be exercised`);
+        for (const button of buttons) {
+          assert.ok((await button.boundingBox()).height >= 36, `${selector} needs a 36px touch target`);
+        }
+      }
       await page.close();
       passed++;
     }

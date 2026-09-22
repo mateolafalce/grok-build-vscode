@@ -179,6 +179,44 @@ describe("approved workflow states", () => {
 });
 
 describe("workflow evidence", () => {
+  it("caps quiet receipt and token clocks independently, and fresh evidence resets each", async () => {
+    const h = boot(); send(h);
+    const moved = { agents: [{ ...base.agents[0], tokens_used: 12 }] };
+    send(h, moved);
+    h.advance(29_000);
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    expect(receipt(h)).toBe("updated 29s ago");
+    expect(activity(h)).toBe("tokens moved 29s ago");
+    h.advance(1000);
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    expect.soft(receipt(h)).toBe("no recent updates (30s+)");
+    expect.soft(activity(h)).toBe("no recent token movement (30s+)");
+    h.advance(3_600_000);
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    expect.soft(receipt(h)).toBe("no recent updates (30s+)");
+    expect.soft(activity(h)).toBe("no recent token movement (30s+)");
+    send(h, moved);
+    expect(receipt(h)).toBe("updated 0s ago");
+    expect.soft(activity(h)).toBe("no recent token movement (30s+)");
+    send(h, { agents: [{ ...base.agents[0], tokens_used: 13 }] });
+    expect(activity(h)).toBe("tokens moved 0s ago");
+  });
+  it("caps state-change age without claiming token activity", () => {
+    const h = boot(); send(h);
+    const blocked = { agents: [{ ...base.agents[0], state: "permission_blocked" }] };
+    send(h, blocked); h.advance(180_000); send(h, blocked);
+    expect(activity(h)).toBe("no recent state change (30s+) · no token activity observed");
+  });
+  it("leaves finished receipt and activity evidence static even while another run ticks", async () => {
+    const h = boot(); send(h);
+    send(h, { status: "complete", agents: [{ ...base.agents[0], tokens_used: 12, state: "done" }] });
+    send(h, { run_id: "other" });
+    h.advance(180_000);
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    const report = card(h);
+    expect.soft(report.querySelector(".workflow-receipt")!.textContent).toBe("final workflow update");
+    expect.soft(report.querySelector(".workflow-agent-activity")!.textContent).toBe("tokens moved");
+  });
   it("does not deny token activity when the first snapshot already has a positive total", () => {
     const h = boot();
     send(h, { agents: [{ ...base.agents[0], tokens_used: 23552 }] }); expand(h);
@@ -359,6 +397,17 @@ describe("reported capabilities", () => {
 });
 
 describe("reachable controls and tool fallback", () => {
+  it.each(["heading", "agent"])("uses decorative SVG disclosure icons for the workflow %s in both states", (target) => {
+    const h = boot(); send(h); if (target === "agent") expand(h);
+    const button = () => pin(h).querySelector(target === "heading" ? ".workflow-pin-toggle" : ".workflow-agent-toggle")!;
+    const indicator = () => button().querySelector(target === "heading" ? ".workflow-chevron" : ".workflow-agent-chevron");
+    expect.soft(indicator()?.querySelector("svg path")?.getAttribute("d")).toBe("m9 18 6-6-6-6");
+    expect.soft(indicator()?.getAttribute("aria-hidden")).toBe("true");
+    click(h.window, button());
+    expect.soft(indicator()?.querySelector("svg path")?.getAttribute("d")).toBe("m6 9 6 6 6-6");
+    click(h.window, button());
+    expect.soft(indicator()?.querySelector("svg path")?.getAttribute("d")).toBe("m9 18 6-6-6-6");
+  });
   it("keeps Pause and Stop in both states and Resume follows the reported state", () => {
     const h = boot(); send(h);
     const controls = () => [...pin(h).querySelectorAll<HTMLButtonElement>(".run-progress-btn")];

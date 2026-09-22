@@ -93,6 +93,6 @@ describe("the captured workflow lifecycle", () => {
       } });
     }
     expect(text(h, ".workflow-card .workflow-agent-state")).toBe("Plan · cancelled · 288K tokens");
-    expect(text(h, ".workflow-card .workflow-agent-activity")).toBe("state changed 0s ago");
+    expect(text(h, ".workflow-card .workflow-agent-activity")).toBe("state changed");
   });
 });

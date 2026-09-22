@@ -2837,9 +2837,8 @@ body.thinking-hidden .msg.thinking { display: none; }
 }
 .workflow-heading > .workflow-pin-toggle { display: flex; width: 100%; margin: 0; padding: 0; }
 .workflow-heading .run-progress-row { align-items: center; gap: 9px; }
-.workflow-chevron { flex: none; opacity: 0.7; font-size: 0.9em; }
-.workflow-chevron::before { content: "⌄"; }
-.is-expanded > .workflow-heading .workflow-chevron::before { content: "⌃"; }
+.workflow-chevron, .workflow-agent-chevron { display: inline-flex; flex: none; align-self: center; opacity: 0.7; }
+.workflow-chevron svg, .workflow-agent-chevron svg { width: 12px; height: 12px; }
 .workflow-pin .workflow-receipt { margin-top: 3px; }
 /* The composer is directly below, so the controls need a real target and air
    above them rather than the transcript card's 6px. */
@@ -2864,8 +2863,7 @@ body.thinking-hidden .msg.thinking { display: none; }
 .workflow-agent-toggle { display: flex; align-items: baseline; gap: 6px; width: 100%; border: 0; padding: 4px 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; white-space: nowrap; }
 .workflow-agent-name { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; }
 .workflow-agent-state { flex: 0 0 auto; }
-.workflow-agent-toggle::after { content: "⌄"; margin-left: auto; }
-.workflow-agent-toggle[aria-expanded="true"]::after { content: "⌃"; }
+.workflow-agent-chevron { margin-left: auto; }
 .workflow-agent-detail { padding: 4px 0; }
 .workflow-roster { overflow-x: auto; list-style: none; padding: 0; margin: 8px 0 2px; }
 .workflow-agent { padding: 5px 0; border-top: 1px solid var(--vscode-editorWidget-border, #555); overflow-wrap: anywhere; }

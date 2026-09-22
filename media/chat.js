@@ -13800,8 +13800,16 @@
     // A snapshot can include a total before this view observes an increase.
     const noTokens = Number.isFinite(agent.tokensUsed) && agent.tokensUsed > 0 ? "" : "no token activity observed";
     if (!event) return noTokens;
-    const seconds = Math.max(0, Math.floor((Date.now() - event.at) / 1000));
-    return `${event.kind} ${formatCount(seconds)}s ago${!event.tokensObserved && noTokens ? ` · ${noTokens}` : ""}`;
+    const label = record.update.done ? event.kind : workflowAge(event.at, event.kind,
+      event.kind === "tokens moved" ? "no recent token movement (30s+)" : "no recent state change (30s+)");
+    return `${label}${!event.tokensObserved && noTokens ? ` · ${noTokens}` : ""}`;
+  }
+
+  // Receipt silence is not proof a run stopped. Keep the two clocks distinct,
+  // but replace unbounded seconds with a quiet, stable observation after 30s.
+  function workflowAge(at, label, quiet) {
+    const seconds = Math.max(0, Math.floor((Date.now() - at) / 1000));
+    return seconds >= 30 ? quiet : `${label} ${formatCount(seconds)}s ago`;
   }
 
   function workflowBlockages(update) {
@@ -13837,9 +13845,10 @@
         // Three distinct facts, never one standing in for another: a frame
         // arrived just now, a frame arrived before this view existed (replay),
         // and this is a finished run being read back.
-        if (receipt) receipt.textContent = record.receivedAt != null
-          ? `updated ${formatCount(Math.max(0, Math.floor((Date.now() - record.receivedAt) / 1000)))}s ago`
-          : record.update.done ? "historical workflow update" : "no update since this view opened";
+        if (receipt) receipt.textContent = record.update.done
+          ? record.receivedAt != null ? "final workflow update" : "historical workflow update"
+          : record.receivedAt != null ? workflowAge(record.receivedAt, "updated", "no recent updates (30s+)")
+          : "no update since this view opened";
         for (const row of surface.querySelectorAll(".workflow-agent")) {
           const agent = record.update.agents[Number(row.dataset.agentIndex)];
           row.querySelector(".workflow-agent-activity").textContent = workflowAgentActivity(record, agent);
@@ -13866,6 +13875,7 @@
       toggle.setAttribute("aria-expanded", String(!!record.expanded));
     }
     el.querySelector(".workflow-expanded").hidden = !record.expanded;
+    el.querySelector(".workflow-chevron").innerHTML = record.expanded ? ICON.chevronDown : ICON.chevronRight;
     const title = el.querySelector(".run-progress-title");
     title.textContent = u.title && u.title !== u.id ? u.title : u.displayName || "Workflow";
     title.title = title.textContent;
@@ -13950,12 +13960,16 @@
         button.setAttribute("aria-expanded", "false");
         workflowText(button, "workflow-agent-name", "", "strong");
         workflowText(button, "workflow-agent-state", "", "span");
+        const chevron = workflowText(button, "workflow-agent-chevron", "", "span");
+        chevron.setAttribute("aria-hidden", "true");
+        chevron.innerHTML = ICON.chevronRight;
         const detail = workflowText(row, "workflow-agent-detail", "");
         detail.hidden = true;
         workflowText(detail, "workflow-agent-activity", "");
         button.onclick = () => {
           detail.hidden = !detail.hidden;
           button.setAttribute("aria-expanded", String(!detail.hidden));
+          chevron.innerHTML = detail.hidden ? ICON.chevronRight : ICON.chevronDown;
         };
       }
       row.querySelector(".workflow-agent-name").textContent = agent.label;
