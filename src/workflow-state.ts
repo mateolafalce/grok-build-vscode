@@ -13,7 +13,11 @@ export function readWorkflowCompletion(
   if (!sessionDir || previous.kind !== "workflow" || previous.done
     || !/^wf_[a-zA-Z0-9_-]+$/.test(previous.id)) return;
   try {
-    const state = JSON.parse(read(path.join(sessionDir, "workflows", previous.id, "state.json")));
+    const file = JSON.parse(read(path.join(sessionDir, "workflows", previous.id, "state.json")));
+    if (!file || typeof file !== "object" || Array.isArray(file)) return;
+    // CLI state files wrap the run in { version, state, script_revision }.
+    // Accept flat states too, but never fall back past a malformed envelope.
+    const state = "state" in file ? file.state : file;
     if (!state || typeof state !== "object" || Array.isArray(state)) return;
     if (typeof state.status !== "string" || !/^(complete|completed|failed|cancelled|stopped|budget_exceeded|error|success)$/.test(state.status)) return;
     const update = parseRunProgressUpdate({

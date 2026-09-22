@@ -28,6 +28,14 @@ function replay() {
 const text = (h: Harness, selector: string) => h.doc.querySelector(selector)?.textContent ?? "";
 
 const statelessRuns = JSON.parse(readFileSync(new URL("fixtures/workflow-stateless-phases.json", import.meta.url), "utf8")).runs;
+const capturedComplete = JSON.parse(readFileSync(new URL("fixtures/workflow-state/complete.json", import.meta.url), "utf8"));
+// Two independent runs with the captured disk structure and fixture-local identities.
+const capturedRuns = [1, 2].map(n => {
+  const file = structuredClone(capturedComplete);
+  file.state.run_id = `wf_capture_${n}`;
+  file.state.name = `captured-research-${n}`;
+  return { run_id: file.state.run_id, name: file.state.name, state: file.state, file };
+});
 const outputRuns = JSON.parse(readFileSync(new URL("fixtures/workflow-output.json", import.meta.url), "utf8")).runs;
 
 describe("old host output compatibility", () => {
@@ -60,7 +68,7 @@ describe("completion without a terminal notification", () => {
     sidebar.mirrorToProjectsRail = () => {};
     sidebar.sendRemoteSession = () => {};
     sidebar.sessionCwd = () => dir;
-    const run = statelessRuns[0];
+    const run = capturedRuns[0];
     const update = parseRunProgressUpdate({ ...run.state, sessionUpdate: "workflow_updated",
       run_id: run.run_id, name: run.name, status: "active", revision: 1 })!;
     const later = Array.from({ length: turns }, (_, i) => `Later turn ${i}`);
@@ -78,7 +86,7 @@ describe("completion without a terminal notification", () => {
       replayBuffer();
       const folder = join(sessionDirFor(dir, dir, session.activeSessionId)!, "workflows", run.run_id);
       mkdirSync(folder, { recursive: true });
-      writeFileSync(join(folder, "state.json"), JSON.stringify(run.state));
+      writeFileSync(join(folder, "state.json"), JSON.stringify(run.file));
       sidebar.refreshWorkflowCompletions(session);
       // Discard the live client's replaceOnly-patched prefix, as a focus switch
       // or reload does. Only the host buffer can make this second replay safe.
@@ -94,7 +102,7 @@ describe("completion without a terminal notification", () => {
       messages.dispatchEvent(new h.window.Event("scroll"));
       expect({ order: order(), pin: h.doc.querySelector(".workflow-pin, .workflow-marker, .run-progress-btn, [aria-current=step]"),
         reports: [...h.doc.querySelectorAll(".workflow-report")].map(el => (el as HTMLDetailsElement).open),
-      }).toEqual({ order: ["Before run", "demo-stages · done", "During run", ...later], pin: null, reports: [false] });
+      }).toEqual({ order: ["Before run", "captured-research-1 · done", "During run", ...later], pin: null, reports: [false] });
     } finally {
       vi.unstubAllEnvs();
       rmSync(dir, { recursive: true, force: true });
@@ -104,8 +112,8 @@ describe("completion without a terminal notification", () => {
   it.each(["desk", "phone"])("does not append a live repair outside the %s window", (surface) => {
     const h = replay();
     (h.window as any).__grokHistoryWindow = 1;
-    const update = parseRunProgressUpdate({ ...statelessRuns[0].state, sessionUpdate: "workflow_updated",
-      run_id: statelessRuns[0].run_id, name: statelessRuns[0].name, status: "active" })!;
+    const update = parseRunProgressUpdate({ ...capturedRuns[0].state, sessionUpdate: "workflow_updated",
+      run_id: capturedRuns[0].run_id, name: capturedRuns[0].name, status: "active" })!;
     dispatch(h.window, { type: "historyReplay", active: true });
     if (surface === "desk") {
       dispatch(h.window, { type: "userMessage", text: "Before run" });
@@ -120,7 +128,7 @@ describe("completion without a terminal notification", () => {
       expanded: [...h.doc.querySelectorAll(".msg.user .body, .workflow-report-toggle")].map(el => el.textContent),
       pin: h.doc.querySelector(".workflow-pin, .workflow-marker, .run-progress-btn"),
     }).toEqual({ visible: ["After run"],
-      expanded: surface === "desk" ? ["Before run", "demo-stages · done", "After run"] : ["After run"], pin: null });
+      expanded: surface === "desk" ? ["Before run", "captured-research-1 · done", "After run"] : ["After run"], pin: null });
   });
 
   it.each(["live", "unobserved completion", "cold replay", "browser reload"])("repairs from disk in the middle of the transcript and replays closed reports in order (%s)", (mode) => {
@@ -145,16 +153,16 @@ describe("completion without a terminal notification", () => {
     sidebar.sendRemoteClient = (_id: string, message: unknown) => dispatch(h.window, message);
     const sessionDir = sessionDirFor(dir, dir, session.activeSessionId)!;
     const writeStates = () => {
-      for (const run of statelessRuns) {
+      for (const run of capturedRuns) {
         const folder = join(sessionDir, "workflows", run.run_id);
         mkdirSync(folder, { recursive: true });
-        writeFileSync(join(folder, "state.json"), JSON.stringify(run.state));
+        writeFileSync(join(folder, "state.json"), JSON.stringify(run.file));
       }
     };
     try {
       if (mode === "cold replay") writeStates();
       dispatch(h.window, { type: "historyReplay", active: mode !== "live" });
-      for (const run of statelessRuns) {
+      for (const run of capturedRuns) {
         sidebar.emit(session, { type: "userMessage", text: `Start ${run.name}` });
         // A deliberately stale notification, not a fabricated capture from the
         // affected machine. Disk state is the supplied CLI shape.
@@ -182,11 +190,11 @@ describe("completion without a terminal notification", () => {
       dispatch(h.window, { type: "historyReplay", active: false });
       expect(h.doc.querySelector(".workflow-pin, .workflow-marker, .run-progress-btn, [aria-current=step]")).toBeNull();
       expect([...h.doc.querySelectorAll(".workflow-report-toggle")].map(el => el.textContent))
-        .toEqual(["demo-stages · done", "demo-stages-2 · done"]);
+        .toEqual(["captured-research-1 · done", "captured-research-2 · done"]);
       expect([...h.doc.querySelectorAll("details")].map(el => el.open)).toEqual([false, false]);
       expect([...h.doc.querySelectorAll(".workflow-phase")].map(el => el.getAttribute("data-state")))
-        .toEqual(["done", "done", "done", "done"]);
-      expect([...h.doc.querySelectorAll(".run-progress-elapsed")].map(el => el.textContent)).toEqual(["4:09", "6:06"]);
+        .toEqual(Array(8).fill("done"));
+      expect([...h.doc.querySelectorAll(".run-progress-elapsed")].map(el => el.textContent)).toEqual(["4:39", "4:39"]);
       expect(h.doc.querySelector(".workflow-agent button, .workflow-agent-chevron")).toBeNull();
       const count = session.buffer.length;
       sidebar.refreshWorkflowCompletions(session);
@@ -201,8 +209,8 @@ describe("completion without a terminal notification", () => {
           : m.type === "userMessage" ? m.text : m.type),
         replayOrder: [...restored.doc.querySelectorAll(".msg.user .body, .workflow-report-toggle")].map(el => el.textContent),
       }).toEqual({
-        bufferOrder: ["Start demo-stages", "demo-stages: true", "Start demo-stages-2", "demo-stages-2: true", "Later conversation"],
-        replayOrder: ["Start demo-stages", "demo-stages · done", "Start demo-stages-2", "demo-stages-2 · done", "Later conversation"],
+        bufferOrder: ["Start captured-research-1", "captured-research-1: true", "Start captured-research-2", "captured-research-2: true", "Later conversation"],
+        replayOrder: ["Start captured-research-1", "captured-research-1 · done", "Start captured-research-2", "captured-research-2 · done", "Later conversation"],
       });
     } finally {
       clearInterval(sidebar.workflowTimer);

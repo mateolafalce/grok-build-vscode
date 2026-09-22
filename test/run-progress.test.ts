@@ -15,6 +15,10 @@ import {
 const statelessRuns = JSON.parse(readFileSync(new URL("fixtures/workflow-stateless-phases.json", import.meta.url), "utf8")).runs;
 const outputRuns = JSON.parse(readFileSync(new URL("fixtures/workflow-output.json", import.meta.url), "utf8")).runs;
 
+const capturedStates = ["complete", "cancelled", "active-1", "active-2", "active-3"].map(name => ({
+  name, file: JSON.parse(readFileSync(new URL(`fixtures/workflow-state/${name}.json`, import.meta.url), "utf8")),
+}));
+
 describe("buffered workflow repairs", () => {
   it("replaces every frame in order from the newest observation and delivers the repair once", () => {
     const sidebar = Object.create(GrokSidebar.prototype) as any;
@@ -118,6 +122,22 @@ describe("workflow content provenance", () => {
 });
 
 describe("the CLI workflow state store", () => {
+  it.each(capturedStates)("reads the captured $name state file without guessing completion", ({ file }) => {
+    const previous = parseRunProgressUpdate({ ...file.state, sessionUpdate: "workflow_updated", status: "active", revision: 42 })!;
+    const result = readWorkflowCompletion("session", previous, () => JSON.stringify(file));
+    expect(result).toEqual(file.state.status === "active" ? undefined : expect.objectContaining({
+      id: file.state.run_id, done: true, phase: file.state.status === "complete" ? "completed" : "cancelled",
+      elapsedMs: file.state.elapsed_ms_floor, revision: 42,
+    }));
+  });
+
+  it("does not use a root terminal status when the wrapped state is active or invalid", () => {
+    const previous = parseRunProgressUpdate({ ...capturedStates[0].file.state, sessionUpdate: "workflow_updated", status: "active" })!;
+    for (const state of [{ status: "active" }, null, [], "complete", {}]) {
+      expect(readWorkflowCompletion("session", previous, () => JSON.stringify({ status: "complete", state }))).toBeUndefined();
+    }
+  });
+
   it("repairs stale notifications from terminal two-stage states without inventing phase states", () => {
     for (const run of statelessRuns) {
       const previous = parseRunProgressUpdate({ ...run.state, run_id: run.run_id, name: run.name,
