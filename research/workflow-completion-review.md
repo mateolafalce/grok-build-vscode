@@ -24,9 +24,9 @@ There are two independently verified paths relevant to the report:
    pinned copies, not transcript entries moved by `refreshWorkflowCompletions`.
    The captured-file lifecycle tests exercise their removal and preservation
    of transcript order after the reader fix.
-2. Cold replay has a separate routing gap. A local `session/load` probe using
-   a copy of an actual completed session produced this sequence (zero-based
-   received-frame positions):
+2. Cold replay had a separate routing gap at `0ad9b0a`. A local `session/load`
+   probe using a copy of an actual completed session produced this sequence
+   (zero-based received-frame positions):
 
    | Position | Method | Update |
    | --- | --- | --- |
@@ -36,10 +36,10 @@ There are two independently verified paths relevant to the report:
    | 69, 74 | `session/update` | later assistant messages |
 
    `AcpClient` sends `_x.ai/session/update` to `subagentLifecycle`.
-   The sidebar forwards it as `subagentUpdate`, and that renderer handles
+   That sidebar forwarded it as `subagentUpdate`, and that renderer handles
    `turn_completed`, `subagent_spawned` and `subagent_finished`, not workflows.
-   Only the separate `xaiNotification` listener calls `parseRunProgressUpdate`.
-   Thus the replayed workflow frames do not establish transcript cards at
+   Only the separate `xaiNotification` listener called `parseRunProgressUpdate`.
+   Thus the replayed workflow frames did not establish transcript cards at
    their historical positions. The disk poll only repairs existing
    `runProgress` entries; it does not discover those discarded frames.
 
@@ -55,5 +55,8 @@ the owner's session took that path.
 The owner's exact four-card session/trace was not among the supplied files.
 Its historical cause remains unproven. Stale composer pins and the cold-replay
 routing gap must not be reported as a confirmed explanation of that specific
-incident without its trace or DOM evidence. The routing gap is recorded here,
-not silently changed as part of the state-envelope repair.
+incident without its trace or DOM evidence. The subsequent routing correction
+reuses `parseRunProgressUpdate` on the persisted rail, returning after emitting
+`runProgress`. `test/workflow-replay.dom.test.ts` fails its middle-of-conversation
+order assertions at `0ad9b0a` and passes with that correction; it also checks
+duplicate/live delivery and reload without moving or duplicating the card.

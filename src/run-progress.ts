@@ -1,7 +1,8 @@
 /**
  * Pure helpers for Deep Research / Workflow / Goal progress cards (P2-10).
  *
- * These ride the live `_x.ai/session_notification` rail as:
+ * These ride live `_x.ai/session_notification` and persisted/replayed
+ * `_x.ai/session/update` rails as:
  *   - `workflow_updated`  — background workflow / deep-research runs
  *   - `goal_updated`      — `/goal` autonomous loops
  *
@@ -190,7 +191,7 @@ function lower(v: unknown): string {
 }
 
 /**
- * True when an `_x.ai/session_notification` update is a workflow/goal progress
+ * True when an xAI session update is a workflow/goal progress
  * event the progress cards act on. Excludes high-frequency noise (no
  * subagent_progress equivalent here — workflow_updated is the rollup).
  */
@@ -215,7 +216,7 @@ export function isRunProgressUpdate(update: unknown): boolean {
 }
 
 /**
- * Normalize a session_notification update into a card-friendly shape, or null
+ * Normalize an xAI session update into a card-friendly shape, or null
  * when it isn't a run-progress kind / lacks an id.
  */
 export function parseRunProgressUpdate(update: unknown): RunProgressUpdate | null {

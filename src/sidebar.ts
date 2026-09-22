@@ -10553,6 +10553,13 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     });
     client.on("subagentLifecycle", (u: unknown, meta?: any) => {
       if (gen !== session.gen) return;
+      // Persisted workflow/goal frames establish cards at their replay position.
+      // Use the live rail's parser and replace the subagent-only forwarding.
+      const runProg = parseRunProgressUpdate(u);
+      if (runProg) {
+        this.emit(session, { type: "runProgress", update: runProg });
+        return;
+      }
       if ((u as { sessionUpdate?: unknown })?.sessionUpdate === "turn_completed") {
         if (session.replaying) {
           this.emit(session, {

@@ -1,8 +1,8 @@
 # Workflow / Goal / Deep Research progress (P2-10)
 
 Design + wire notes for progress cards on the live `_x.ai/session_notification`
-rail. Engines stay in the CLI; the extension only renders cards and optional
-pause/resume/stop by display name.
+and persisted `_x.ai/session/update` rails. Engines stay in the CLI; the extension
+only renders cards and optional pause/resume/stop by display name.
 
 ## Slash surface (leave alone)
 
@@ -42,11 +42,16 @@ From CLI binary symbols (0.2.111) + session_notification family:
 | Layer | Role |
 |---|---|
 | `src/run-progress.ts` | Pure `isRunProgressUpdate` / `parseRunProgressUpdate` / `workflowControlCommand` |
-| `sidebar.ts` xaiNotification | Emit `{ type: "runProgress", update }` |
+| `sidebar.ts` xaiNotification / subagentLifecycle | Share `parseRunProgressUpdate` and emit `{ type: "runProgress", update }`; a parsed replay frame returns before subagent forwarding |
 | `media/chat.js` | Upsert teal progress cards; Pause/Resume/Stop → `workflowControl` → `/workflow …` |
 
-Cards are buffered on the session like subagent rows, so a warm re-focus
-replays them. `readWorkflowCompletion` reconciles unfinished buffered runs with
+Cold replay establishes each card at its first workflow frame. Cards are buffered
+on the session like subagent rows, so a warm re-focus replays them. Live updates
+for the same run id update that card in place; duplicate frames do not create a
+second card, and older revisions cannot rewind it. The order regression in
+`test/workflow-replay.dom.test.ts` drives the real ACP dispatcher, sidebar and
+renderer through cold load, both rails, and a fresh webview buffer replay.
+`readWorkflowCompletion` reconciles unfinished buffered runs with
 `~/.grok/sessions/<encoded cwd>/<session id>/workflows/<run id>/state.json`
 on notification ingestion, before replay, and every two seconds for pooled
 sessions, including sessions without a viewer. Only an explicit terminal run
