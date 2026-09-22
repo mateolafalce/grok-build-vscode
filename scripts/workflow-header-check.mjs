@@ -95,8 +95,15 @@ try {
         assert.doesNotMatch(await row.locator(".workflow-agent-state").innerText(), /reported/,
           "agent states must omit the reported prefix");
       }
-      assert.equal(await rows.nth(0).locator(".workflow-agent-state").innerText(), "Plan · done · 23.55K tokens");
-      assert.equal(await rows.nth(1).locator(".workflow-agent-state").innerText(), "Research · done · 288K tokens");
+      // The phase belongs to the composed name now, so the metadata run carries
+      // state and spend only -- no row may print its phase twice.
+      assert.equal(await rows.nth(0).locator(".workflow-agent-state").innerText(), "done · 23.55K tokens");
+      assert.equal(await rows.nth(1).locator(".workflow-agent-state").innerText(), "done · 288K tokens");
+      // "Researcher 0" adds nothing to "Plan", so the phase leads it; "Researcher 1"
+      // already reads as its own phase and must stand alone rather than become
+      // "Research / Researcher 1".
+      assert.equal(await rows.nth(0).locator(".workflow-agent-name").innerText(), "Plan / Researcher 0");
+      assert.equal(await rows.nth(1).locator(".workflow-agent-name").innerText(), "Researcher 1");
       const checkLayout = async () => page.evaluate(() => {
         const card = document.querySelector(".workflow-pin-run");
         const header = card.querySelector(".workflow-heading");

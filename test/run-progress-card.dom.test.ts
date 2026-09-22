@@ -189,6 +189,21 @@ describe("approved workflow states", () => {
     expect(phase().textContent).toBe("Verify");
     expect(pin(h).querySelector(".workflow-heading .run-progress-elapsed")!.textContent).toBe("1:46");
   });
+  // A row printed the label AND the phase, and the label almost always already
+  // contained the phase: "pick Pick", "object Object", "read:readme Read".
+  // One composed name, repeating nothing.
+  it.each([
+    ["pick", "Pick", "Pick"],
+    ["object", "Object", "Object"],
+    ["read:readme", "Read", "Read / readme"],
+    ["read:agents", "Read", "Read / agents"],
+    ["researcher-0", "Research", "researcher-0"],
+    ["research-planner", "Plan", "Plan / research-planner"],
+  ])("names agent %s in phase %s as %s", (label, phase, expected) => {
+    const h = boot();
+    send(h, { agents: [{ agent_id: "a", label, phase, state: "done", tokens_used: 10 }] }); expand(h);
+    expect(pin(h).querySelector(".workflow-agent-name")!.textContent).toBe(expected);
+  });
   it("shows one line per agent and toggles each detail independently", () => {
     const h = boot();
     const agents = [base.agents[0], { ...base.agents[0], agent_id: "b", label: "Verifier", phase: "Verify", state: "pending", tokens_used: 19638 }];
@@ -198,7 +213,10 @@ describe("approved workflow states", () => {
     expect([...pin(h).querySelectorAll(".workflow-phase")].map((p) => p.textContent)).toEqual(base.phases.map((p) => p.title));
     const rows = [...pin(h).querySelectorAll(".workflow-agent")];
     expect(rows).toHaveLength(2);
-    expect(rows[0].querySelector("button")!.textContent).toContain("Research \u00b7 running \u00b7 0 tokens");
+    // The phase now lives in the composed name, not the metadata run.
+    expect(rows[0].querySelector("button")!.textContent).toContain("Researcher A");
+    expect(rows[0].querySelector("button")!.textContent).toContain("running");
+    expect(rows[0].querySelector(".workflow-agent-state")!.textContent).not.toContain("Research");
     expect(rows[1].querySelector(".workflow-agent-toggle")!.textContent).toContain("19.64K tokens");
     expect(rows[1].querySelector("button, .workflow-agent-chevron, [aria-expanded]")).toBeNull();
     expect(hidden(rows[0].querySelector(".workflow-agent-detail"))).toBe(true);
@@ -308,7 +326,7 @@ describe("workflow evidence", () => {
   it("renders a done agent state without the reported prefix", () => {
     const h = boot();
     send(h, { agents: [{ ...base.agents[0], phase: "Plan", state: "done" }] });
-    expect(agent(h).querySelector(".workflow-agent-state")!.textContent).toBe("Plan · done · 0 tokens");
+    expect(agent(h).querySelector(".workflow-agent-state")!.textContent).toBe("done · 0 tokens");
   });
   it.each([
     [1000, "1K"], [23552, "23.55K"], [99999, "100K"], [100000, "100K"],
@@ -316,7 +334,7 @@ describe("workflow evidence", () => {
   ])("formats %i agent tokens like the context window (%s)", (tokens, formatted) => {
     const h = boot();
     send(h, { agents: [{ ...base.agents[0], tokens_used: tokens }] });
-    expect(agent(h).querySelector(".workflow-agent-state")!.textContent).toBe(`Research · running · ${formatted} tokens`);
+    expect(agent(h).querySelector(".workflow-agent-state")!.textContent).toBe(`running · ${formatted} tokens`);
   });
   it("ages token events independently of receipts and duplicate revisions", () => {
     const h = boot(); send(h, { revision: 1 });

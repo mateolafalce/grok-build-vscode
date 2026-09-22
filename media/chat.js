@@ -13784,6 +13784,30 @@
     return name || "";
   }
 
+  // The roster printed the label and the phase side by side, and the label
+  // almost always already contained the phase: an agent labelled `pick` in
+  // phase `Pick` read "pick Pick", `read:readme` in `Read` read
+  // "read:readme Read". Compose ONE name -- the phase, then only what the
+  // label actually adds.
+  function workflowAgentName(agent) {
+    const phase = String(agent.phase || "").trim();
+    const label = String(agent.label || "").trim();
+    if (!phase || !label) return label || phase;
+    const bare = (s) => s.toLowerCase().replace(/[s:_/-]+/g, "");
+    if (bare(label) === bare(phase)) return phase;
+    if (label.toLowerCase().startsWith(phase.toLowerCase())) {
+      const tail = label.slice(phase.length);
+      const rest = tail.replace(/^[s:_/-]+/, "");
+      if (!rest) return phase;
+      // `read:readme` adds "readme" after a separator, so the phase leads and
+      // the label contributes the rest. `researcher-0` has no separator: it
+      // already reads as its own phase, so it stands alone rather than
+      // becoming "Research / researcher-0", which is the repetition again.
+      return rest !== tail ? `${phase} / ${rest}` : label;
+    }
+    return `${phase} / ${label}`;
+  }
+
   // The live lifecycle word, humanized. An empty phase means ordinarily
   // running: the CLI only fills it once something has happened to the run.
   function workflowLiveStatus(update) {
@@ -14041,8 +14065,8 @@
           chevron.innerHTML = detail.hidden ? ICON.chevronRight : ICON.chevronDown;
         };
       }
-      row.querySelector(".workflow-agent-name").textContent = agent.label;
-      row.querySelector(".workflow-agent-state").textContent = [agent.phase, agent.state ? agent.state.replace(/[_-]+/g, " ") : "",
+      row.querySelector(".workflow-agent-name").textContent = workflowAgentName(agent);
+      row.querySelector(".workflow-agent-state").textContent = [agent.state ? agent.state.replace(/[_-]+/g, " ") : "",
         Number.isFinite(agent.tokensUsed) ? `${compactTokens(agent.tokensUsed)} tokens` : ""].filter(Boolean).join(" · ");
       row.querySelector(".workflow-agent-activity").textContent = activity;
       return row;
