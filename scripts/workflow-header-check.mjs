@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { chromium } from "playwright";
 
 const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
+const statelessRuns = JSON.parse(read("test/fixtures/workflow-stateless-phases.json")).runs;
 const body = read("test/webview-harness.ts").match(/export const BODY = `([\s\S]*?)`;/)[1];
 const shell = read("src/desktop/electron-webview.ts");
 const palette = shell.match(/:root \{[\s\S]*?\n\}/)[0];
@@ -62,6 +63,20 @@ try {
       await checkDisclosure(header.locator("button"), ".workflow-chevron", true);
       assert.equal(await phase.evaluate(el => getComputedStyle(el).clipPath), "inset(50%)");
       const rows = page.locator(".workflow-pin-run .workflow-agent");
+      assert.equal(await rows.locator("button, .workflow-agent-chevron").count(), 0,
+        "a positive-total snapshot has no observed activity to disclose");
+      // A subsequent increase supplies real detail; disclosures must appear.
+      await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", { data: {
+        type: "runProgress", update: {
+          kind: "workflow", id: "header-check", displayName: "deep-research", phase: "running",
+          currentPhase: "Verify", elapsedMs: 106000, done: false,
+          phases: ["Plan", "Research", "Verify", "Report"].map(title => ({ title, state: title === "Verify" ? "active" : "pending" })),
+          agents: Array.from({ length: 16 }, (_, i) => ({
+            id: `a${i}`, label: `Researcher ${i}`, phase: i === 0 ? "Plan" : "Research",
+            state: "done", tokensUsed: i === 0 ? 23553 : 288308,
+          })),
+        },
+      } })));
       for (const row of await rows.all()) {
         await checkDisclosure(row.locator("button"), ".workflow-agent-chevron", false);
         await row.locator("button").click();
@@ -124,6 +139,7 @@ try {
       } })));
       assert.equal(await page.locator(".workflow-pin, .workflow-marker, .run-progress-btn").count(), 0);
       const report = page.locator(".workflow-report");
+      assert.equal(await report.evaluate(el => el.open), false, "settled report must arrive closed");
       assert.equal(await report.locator("summary").textContent(), "deep-research · done");
       await report.locator("summary").click();
       assert.equal(await report.locator('.workflow-phase[data-state="done"]').count(), 4);
@@ -151,6 +167,27 @@ try {
       const interruptedColor = await interrupted.evaluate(el => getComputedStyle(el).color);
       const pendingColor = await pending.evaluate(el => getComputedStyle(el).color);
       assert.notEqual(interruptedColor, pendingColor, "an interrupted step must not read identically to one never reached");
+      for (const historical of [false, true]) {
+        await page.evaluate(({ runs, historical }) => {
+          const send = data => window.dispatchEvent(new MessageEvent("message", { data }));
+          send({ type: "clearMessages" });
+          send({ type: "historyReplay", active: historical });
+          for (const run of runs) send({ type: "runProgress", update: {
+            kind: "workflow", id: run.run_id, title: run.name, displayName: run.name,
+            // The old host knew the phase word but did not recognize `complete`.
+            phase: run.state.status, done: false, currentPhase: run.state.current_phase,
+            phases: run.state.phases, elapsedMs: run.state.elapsed_ms_floor,
+            agents: run.state.agents.map(a => ({ id: a.agent_id, label: a.label, phase: a.phase, state: a.state, tokensUsed: a.tokens_used })),
+          } });
+          send({ type: "historyReplay", active: false });
+        }, { runs: statelessRuns, historical });
+        assert.equal(await page.locator(".workflow-pin, .workflow-marker, .run-progress-btn").count(), 0);
+        assert.deepEqual(await page.locator(".workflow-report").evaluateAll(els => els.map(el => el.open)), [false, false]);
+        assert.deepEqual(await page.locator(".workflow-report-toggle").allTextContents(), ["demo-stages · done", "demo-stages-2 · done"]);
+        for (const report of await page.locator(".workflow-report").all()) await report.locator("summary").click();
+        assert.equal(await page.locator('.workflow-phase[data-state="done"]').count(), 4);
+        assert.equal(await page.locator(".workflow-agent button, .workflow-agent-chevron").count(), 0);
+      }
       // The standalone editor rail has its own stylesheet and renderer.
       // Check its real controls too; chat.css cannot fix that webview.
       await page.setContent(`<style>${palette}${read("media/projects-rail.css")}</style>

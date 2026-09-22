@@ -13917,7 +13917,7 @@
       const current = !u.done && !reportedTerminal && atPosition;
       // current_phase survives completion. It locates the final step; it must
       // not revive it, nor leave an active step in a terminal transcript card.
-      const phaseState = u.done && !reportedTerminal && (atPosition || phase.state === "active")
+      const phaseState = u.done && !reportedTerminal && (atPosition || phase.state === "active" || (!phase.state && !u.failed && !u.cancelled))
         ? u.failed ? "failed" : u.cancelled ? "cancelled" : "done"
         : current ? "active" : phase.state || "unknown";
       for (const [parent, className, label, tag] of [[strip, "workflow-phase", phase.title, "li"], [dots, "workflow-dot", "", "span"]]) {
@@ -13954,19 +13954,27 @@
       row._agentKey = key;
       row.dataset.agentIndex = String(i);
       row.dataset.state = agent.state || "unknown";
+      const activity = workflowAgentActivity(record, agent);
+      const hasDetails = !!activity;
+      if (row._hasDetails !== hasDetails) row.replaceChildren();
+      row._hasDetails = hasDetails;
       if (!row.firstChild) {
-        const button = workflowText(row, "workflow-agent-toggle", "", "button");
-        button.type = "button";
-        button.setAttribute("aria-expanded", "false");
+        const button = workflowText(row, "workflow-agent-toggle", "", hasDetails ? "button" : "div");
+        if (hasDetails) {
+          button.type = "button";
+          button.setAttribute("aria-expanded", "false");
+        }
         workflowText(button, "workflow-agent-name", "", "strong");
         workflowText(button, "workflow-agent-state", "", "span");
-        const chevron = workflowText(button, "workflow-agent-chevron", "", "span");
-        chevron.setAttribute("aria-hidden", "true");
-        chevron.innerHTML = ICON.chevronRight;
+        const chevron = hasDetails ? workflowText(button, "workflow-agent-chevron", "", "span") : null;
+        if (chevron) {
+          chevron.setAttribute("aria-hidden", "true");
+          chevron.innerHTML = ICON.chevronRight;
+        }
         const detail = workflowText(row, "workflow-agent-detail", "");
         detail.hidden = true;
         workflowText(detail, "workflow-agent-activity", "");
-        button.onclick = () => {
+        if (hasDetails) button.onclick = () => {
           detail.hidden = !detail.hidden;
           button.setAttribute("aria-expanded", String(!detail.hidden));
           chevron.innerHTML = detail.hidden ? ICON.chevronRight : ICON.chevronDown;
@@ -13975,7 +13983,7 @@
       row.querySelector(".workflow-agent-name").textContent = agent.label;
       row.querySelector(".workflow-agent-state").textContent = [agent.phase, agent.state ? agent.state.replace(/[_-]+/g, " ") : "",
         Number.isFinite(agent.tokensUsed) ? `${compactTokens(agent.tokensUsed)} tokens` : ""].filter(Boolean).join(" · ");
-      row.querySelector(".workflow-agent-activity").textContent = workflowAgentActivity(record, agent);
+      row.querySelector(".workflow-agent-activity").textContent = activity;
       return row;
     });
     for (const child of [...roster.children]) if (!rows.includes(child)) child.remove();
@@ -14095,6 +14103,13 @@
   }
 
   function applyWorkflowProgress(update) {
+    // Older hosts recognized the lifecycle word but sent done:false for
+    // `complete`. Repair only explicit terminal evidence, never quiet receipts
+    // or a roster whose agents could be between workflow stages.
+    const terminal = /^(complete|completed|failed|cancelled|cleared|stopped|budget_exceeded|error|success)$/.test(update.phase || "");
+    if (terminal && !update.done) update = { ...update, done: true,
+      failed: update.failed || /^(failed|budget_exceeded|error)$/.test(update.phase),
+      cancelled: update.cancelled || /^(cancelled|cleared|stopped)$/.test(update.phase) };
     const id = String(update.id);
     let el = state.runProgressCards.get(id);
     // Loading older transcript pages must not rewind a live run or its pin.

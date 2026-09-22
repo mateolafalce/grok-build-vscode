@@ -1,4 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { readWorkflowCompletion } from "../src/workflow-state";
 import {
   isRunProgressUpdate,
   parseRunProgressUpdate,
@@ -6,6 +8,47 @@ import {
   runProgressKindLabel,
   formatRunProgressPct,
 } from "../src/run-progress";
+
+const statelessRuns = JSON.parse(readFileSync(new URL("fixtures/workflow-stateless-phases.json", import.meta.url), "utf8")).runs;
+
+describe("the CLI workflow state store", () => {
+  it("repairs stale notifications from terminal two-stage states without inventing phase states", () => {
+    for (const run of statelessRuns) {
+      const previous = parseRunProgressUpdate({ ...run.state, run_id: run.run_id, name: run.name,
+        sessionUpdate: "workflow_updated", status: "active", revision: 42 })!;
+      const completed = readWorkflowCompletion("session", previous, () => JSON.stringify(run.state));
+      expect(completed).toMatchObject({ id: run.run_id, displayName: run.name, title: run.name,
+        done: true, phase: "completed", currentPhase: "Summarize", elapsedMs: run.state.elapsed_ms_floor,
+        revision: 42, agentsUsed: 3, agentBudget: 4 });
+      expect(completed?.phases).toEqual([{ title: "Read" }, { title: "Summarize" }]);
+      expect(completed?.agents?.map(a => a.state)).toEqual(["done", "done", "done"]);
+    }
+  });
+
+  it("leaves active all-done rosters, unavailable state and unsafe run ids alone", () => {
+    const run = statelessRuns[0];
+    const previous = parseRunProgressUpdate({ ...run.state, run_id: run.run_id, name: run.name,
+      sessionUpdate: "workflow_updated", status: "active" })!;
+    for (const status of ["active", "user_paused", undefined]) {
+      expect(readWorkflowCompletion("session", previous, () => JSON.stringify({ ...run.state, status }))).toBeUndefined();
+    }
+    for (const raw of ["{", "null", "[]"]) expect(readWorkflowCompletion("session", previous, () => raw)).toBeUndefined();
+    for (const code of ["ENOENT", "EACCES", "EIO"]) {
+      expect(readWorkflowCompletion("session", previous, () => { throw Object.assign(new Error(code), { code }); })).toBeUndefined();
+    }
+    const noRead = vi.fn(() => JSON.stringify(run.state));
+    expect(readWorkflowCompletion("session", { ...previous, id: "../../other" }, noRead)).toBeUndefined();
+    expect(readWorkflowCompletion(undefined, previous, noRead)).toBeUndefined();
+    expect(readWorkflowCompletion("session", { ...previous, done: true }, noRead)).toBeUndefined();
+    expect(noRead).not.toHaveBeenCalled();
+  });
+
+  it("parses a complete run even though its phase definitions have no state", () => {
+    const run = statelessRuns[0];
+    expect(parseRunProgressUpdate({ ...run.state, run_id: run.run_id, name: run.name, sessionUpdate: "workflow_updated" }))
+      .toMatchObject({ done: true, phase: "complete", phases: [{ title: "Read" }, { title: "Summarize" }] });
+  });
+});
 
 describe("isRunProgressUpdate", () => {
   it("accepts workflow_updated / goal_updated and lifecycle siblings", () => {

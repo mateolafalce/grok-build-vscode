@@ -451,9 +451,11 @@ import {
   isThumbsRating,
   parseFeedbackEnabledMeta,
 } from "./feedback";
+import { readWorkflowCompletion } from "./workflow-state";
 import {
   parseRunProgressUpdate,
   workflowControlCommand,
+  type RunProgressUpdate,
 } from "./run-progress";
 import {
   APP_PURPOSE_KEY,
@@ -1196,6 +1198,7 @@ export class GrokSidebar {
    *  exactly once across every host sharing this `~/.grok`. */
   private readonly routineRuns: RoutineRunStore;
   private routineTimer?: ReturnType<typeof setInterval>;
+  private workflowTimer?: ReturnType<typeof setInterval>;
   /** Last wake time the relay accepted. `undefined` = never published, which is
    *  distinct from `null` = published "nothing scheduled". */
   private publishedWakeAt: number | null | undefined;
@@ -1240,6 +1243,7 @@ export class GrokSidebar {
     void this.sweepImageStaging();
     void this.sweepFileStaging();
     this.startRoutineScheduler();
+    this.startWorkflowCompletionPolling();
   }
 
   /* ------------------------------------------------------------ routines */
@@ -8797,6 +8801,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     void this.host.setContext("grok.composerFocus", false);
     if (this.reaper) { clearInterval(this.reaper); this.reaper = undefined; }
     if (this.routineTimer) { clearInterval(this.routineTimer); this.routineTimer = undefined; }
+    if (this.workflowTimer) { clearInterval(this.workflowTimer); this.workflowTimer = undefined; }
     for (const timer of this.loginReprobeTimers.values()) clearTimeout(timer);
     this.cancelAllDeviceLogins();
     this.loginReprobeTimers.clear();
@@ -17419,6 +17424,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     if (!wv) return;
     this.touch(session);
     this.markRead(session);
+    this.refreshWorkflowCompletions(session);
     void wv.postMessage({ type: "clearMessages" });
     void wv.postMessage({ type: "historyReplay", active: true });
     for (const m of session.buffer) {
@@ -17737,6 +17743,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     }
     const clientIds = this.remoteClients.clientsForActiveValue(session);
     if (clientIds.length === 0) return;
+    this.refreshWorkflowCompletions(session);
     const snapshot = [
       ...bracketRemoteSnapshot(session.buffer),
       { type: "subscriptionUsage" as const, windows: session.subscriptionUsage?.snapshot() ?? [] },
@@ -18165,6 +18172,33 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     };
   }
 
+  private startWorkflowCompletionPolling(): void {
+    this.workflowTimer = setInterval(() => {
+      for (const session of new Set([this.focused, ...this.pool])) this.refreshWorkflowCompletions(session);
+    }, 2000);
+    this.workflowTimer.unref?.();
+  }
+
+  private workflowCompletion(session: Session, update: RunProgressUpdate) {
+    if (session.provider !== "grok" || update.kind !== "workflow" || update.done) return;
+    const sid = session.activeSessionId || session.client?.sessionId;
+    if (!sid) return;
+    const dir = sessionDirFor(resolveGrokHome(process.env), this.sessionCwd(session), sid, { fs: defaultFs });
+    return readWorkflowCompletion(dir, update);
+  }
+
+  private refreshWorkflowCompletions(session: Session): void {
+    if (session.provider !== "grok") return;
+    const latest = new Map<string, RunProgressUpdate>();
+    for (const message of session.buffer) {
+      if (message.type === "runProgress" && message.update.kind === "workflow") latest.set(message.update.id, message.update);
+    }
+    for (const update of latest.values()) {
+      const completed = this.workflowCompletion(session, update);
+      if (completed) this.emit(session, { type: "runProgress", update: completed });
+    }
+  }
+
   /**
    * Session-scoped post. Records the message in that session's view buffer (so a
    * focus switch can rebuild its chat losslessly — clearMessages + replay) and,
@@ -18177,6 +18211,10 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
    * focused one, so this is behaviorally identical to `post`.)
    */
   private emit(session: Session, message: HostMsg): void {
+    if (message.type === "runProgress") {
+      const completed = this.workflowCompletion(session, message.update);
+      if (completed) message = { type: "runProgress", update: completed };
+    }
     // A capture still running when tools start may already contain their writes.
     // Prefer the tool-row fallback to presenting that as the pre-turn file.
     if (session.turnToken && (message.type === "toolCall" || message.type === "toolCallUpdate"
@@ -18242,6 +18280,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
       // A saved id may still be an untouched shell. Only a successful replay
       // can prove that; failed loads retain the provider lock.
       session.hasHistory = session.historyEventCount > 0 || session.userMessageCount > 0;
+      this.refreshWorkflowCompletions(session);
     }, {
       onStart: () => this.emit(session, { type: "historyReplay", active: true }),
       onFinish: () => {
@@ -18447,6 +18486,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     this.focused = session;
     this.touch(session);
     this.markRead(session); // opening it clears any unread (green/red) badge
+    this.refreshWorkflowCompletions(session);
     const wv = this.view?.webview;
     // Both surfaces need it, and the desk has the same gap the browser does —
     // re-focusing a live conversation never said which agent it belongs to.
@@ -19634,6 +19674,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     // than being relabelled after the fact. See sessionIdentityFrame.
     const identity = this.sessionIdentityFrame(session);
     if (identity) this.sendRemoteClient(clientId, identity);
+    this.refreshWorkflowCompletions(session);
     for (const msg of bracketRemoteSnapshot(session.buffer)) this.sendRemoteClient(clientId, msg);
     for (const msg of sessionUiSnapshot(session, this.displayMode(session))) this.sendRemoteClient(clientId, msg);
     if (notifyCatalog) this.postRepoCatalog();
@@ -21141,6 +21182,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     // Conversation buffer only when the bound session still lives under an
     // authorized cwd (revoke disposes doomed sessions; this is the belt).
     if (session && sessionCwdOk && !session.replaying) {
+      this.refreshWorkflowCompletions(session);
       snap.push(...bracketRemoteSnapshot(session.buffer));
     }
     if (session && sessionCwdOk) {

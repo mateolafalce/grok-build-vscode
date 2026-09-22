@@ -46,8 +46,15 @@ From CLI binary symbols (0.2.111) + session_notification family:
 | `media/chat.js` | Upsert teal progress cards; Pause/Resume/Stop → `workflowControl` → `/workflow …` |
 
 Cards are buffered on the session like subagent rows, so a warm re-focus
-replays them. Workflow agent rows expand to show dated activity evidence. Expansion is held
-in memory per run, with every new run collapsed; it is never a host setting.
+replays them. `readWorkflowCompletion` reconciles unfinished buffered runs with
+`~/.grok/sessions/<encoded cwd>/<session id>/workflows/<run id>/state.json`
+on notification ingestion, before replay, and every two seconds for pooled
+sessions, including sessions without a viewer. Only an explicit terminal run
+status repairs a notification; missing, unreadable or incomplete files retry.
+Workflow agent rows disclose activity only when there is detail to show.
+Rows with a positive snapshot token total and no observed activity have no
+button or chevron. Expansion is held in memory per run, with every new run
+collapsed; it is never a host setting.
 
 A live transcript entry is a non-expandable name/status marker. The pinned card
 shows static dots from the reported phases, current phase, reported elapsed time,
@@ -55,7 +62,9 @@ and `updated Ns ago` from frame arrival. Its expanded view adds labelled phases,
 agent budget and single-line agent summaries. Pause/Resume and Stop stay outside
 the disclosure. A finished run (`complete` or `completed`, including a Partial
 result summary) leaves the pin and replaces its marker with an expandable
-summary. The retained current phase cannot mark a terminal run's step active;
+summary that arrives collapsed, without Pause/Stop. Stateless phase definitions
+remain unknown during a live run except for its current position; successful
+completion marks them done. The retained current phase cannot mark a terminal run's step active;
 failed/cancelled runs preserve pending steps instead of claiming they finished.
 
 This summary renders notification metadata, not the contents of a report file.
@@ -75,3 +84,27 @@ A dedicated live capture (launch `/deep-research` and dump `workflow_updated`
 payloads) can be added under `research/run-progress-probe.cjs` when credit budget
 allows; unit tests pin the pure parsers against synthetic shapes derived from
 binary field names + user-guide semantics.
+
+## Reload and older hosts
+
+The relay forwards the host snapshot; it does not read the CLI workflow store.
+`GrokSidebar.emit` buffers normalized `runProgress` messages.
+`buildRemoteSnapshot` / `sendRemoteHistorySnapshot` bracket that buffer in
+`historyReplay`; a full host restart first obtains history via ACP
+`session/load`. Replaying a stale active notification does not consult
+`state.json` unless the host reconciles it. The client receipt then correctly
+says "no update since this view opened", but the run status can be stale.
+
+A repaired update uses the existing `runProgress` message, `done: true`, and
+`phase: "completed"` for CLI `complete`. The v2.0.4 renderer already maps
+`completed` to done and removes controls using `done`; no new wire value is
+introduced. The newer client also recognizes explicit terminal phase values
+from hosts that incorrectly set `done: false`. It cannot establish completion
+from an old host's active-only snapshot, silence, or all-done agents between
+stages. Missing terminal evidence therefore needs the host repair deployed.
+
+The two-stage fixture records the supplied state shape and identifies its
+synthetic second-run fields. Regression stale notifications are constructed,
+not claimed as a capture. Direct access to the affected Sprite was denied
+(EACCES) during this repair, so the exact last notification in its store has
+not been independently read.

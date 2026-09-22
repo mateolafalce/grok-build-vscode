@@ -133,7 +133,8 @@ describe("approved workflow states", () => {
     const rows = [...pin(h).querySelectorAll(".workflow-agent")];
     expect(rows).toHaveLength(2);
     expect(rows[0].querySelector("button")!.textContent).toContain("Research \u00b7 running \u00b7 0 tokens");
-    expect(rows[1].querySelector("button")!.textContent).toContain("19.64K tokens");
+    expect(rows[1].querySelector(".workflow-agent-toggle")!.textContent).toContain("19.64K tokens");
+    expect(rows[1].querySelector("button, .workflow-agent-chevron, [aria-expanded]")).toBeNull();
     expect(hidden(rows[0].querySelector(".workflow-agent-detail"))).toBe(true);
     click(h.window, rows[0].querySelector("button")!);
     expect(hidden(rows[0].querySelector(".workflow-agent-detail"))).toBe(false);
@@ -220,9 +221,23 @@ describe("workflow evidence", () => {
   it("does not deny token activity when the first snapshot already has a positive total", () => {
     const h = boot();
     send(h, { agents: [{ ...base.agents[0], tokens_used: 23552 }] }); expand(h);
-    click(h.window, agent(h).querySelector("button")!);
+    expect(agent(h).querySelector("button, .workflow-agent-chevron, [aria-expanded]")).toBeNull();
     expect(agent(h).querySelector(".workflow-agent-state")!.textContent).toContain("23.55K tokens");
     expect(activity(h)).toBe("");
+  });
+  it("adds a disclosure when evidence arrives and removes it when replay has none", () => {
+    const h = boot();
+    send(h, { agents: [{ ...base.agents[0], tokens_used: 20 }] }); expand(h);
+    expect(agent(h).querySelector("button, .workflow-agent-chevron")).toBeNull();
+    send(h, { agents: [{ ...base.agents[0], tokens_used: 21 }] });
+    click(h.window, agent(h).querySelector("button")!);
+    expect(hidden(agent(h).querySelector(".workflow-agent-detail"))).toBe(false);
+    expect(activity(h)).toBe("tokens moved 0s ago");
+    dispatch(h.window, { type: "historyReplay", active: true });
+    send(h, { agents: [{ ...base.agents[0], tokens_used: 21 }] });
+    dispatch(h.window, { type: "historyReplay", active: false });
+    expect(agent(h).querySelector("button, .workflow-agent-chevron, [aria-expanded]")).toBeNull();
+    expect(hidden(agent(h).querySelector(".workflow-agent-detail"))).toBe(true);
   });
   it("renders a done agent state without the reported prefix", () => {
     const h = boot();
