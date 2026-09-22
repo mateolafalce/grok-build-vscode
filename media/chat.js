@@ -13797,9 +13797,11 @@
   function workflowAgentActivity(record, agent) {
     const key = workflowAgentKey(agent, record.update.agents || []);
     const event = key && record.activity.get(key);
-    if (!event) return "no token activity observed";
+    // A snapshot can include a total before this view observes an increase.
+    const noTokens = Number.isFinite(agent.tokensUsed) && agent.tokensUsed > 0 ? "" : "no token activity observed";
+    if (!event) return noTokens;
     const seconds = Math.max(0, Math.floor((Date.now() - event.at) / 1000));
-    return `${event.kind} ${formatCount(seconds)}s ago${event.tokensObserved ? "" : " · no token activity observed"}`;
+    return `${event.kind} ${formatCount(seconds)}s ago${!event.tokensObserved && noTokens ? ` · ${noTokens}` : ""}`;
   }
 
   function workflowBlockages(update) {
@@ -13951,8 +13953,8 @@
         };
       }
       row.querySelector(".workflow-agent-name").textContent = agent.label;
-      row.querySelector(".workflow-agent-state").textContent = [agent.phase, agent.state ? `reported ${agent.state.replace(/[_-]+/g, " ")}` : "",
-        Number.isFinite(agent.tokensUsed) ? `${formatCount(agent.tokensUsed)} tokens` : ""].filter(Boolean).join(" · ");
+      row.querySelector(".workflow-agent-state").textContent = [agent.phase, agent.state ? agent.state.replace(/[_-]+/g, " ") : "",
+        Number.isFinite(agent.tokensUsed) ? `${compactTokens(agent.tokensUsed)} tokens` : ""].filter(Boolean).join(" · ");
       row.querySelector(".workflow-agent-activity").textContent = workflowAgentActivity(record, agent);
       return row;
     });

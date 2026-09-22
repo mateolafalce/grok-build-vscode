@@ -48,7 +48,7 @@ describe("the captured workflow lifecycle", () => {
   });
   it("observes a cancelled state transition without portraying it as ongoing work", () => {
     const h = replay(); h.frame(4); h.frame(5);
-    expect(text(h, ".workflow-agent-state")).toContain("reported cancelled");
+    expect(text(h, ".workflow-agent-state")).toBe("Plan · cancelled · 0 tokens");
     expect(text(h, ".workflow-agent-activity")).toBe("state changed 0s ago \u00b7 no token activity observed");
     h.advance(12000); h.frame(5);
     expect(text(h, ".workflow-agent-activity")).toBe("state changed 12s ago \u00b7 no token activity observed");
@@ -60,8 +60,19 @@ describe("the captured workflow lifecycle", () => {
     expect(h.doc.querySelector(".workflow-pin")).toBeNull();
     expect(text(h, ".workflow-card .run-progress-phase")).toBe("· Plan · cancelled");
     expect(text(h, ".workflow-card .run-progress-elapsed")).toBe("0:00");
-    expect(text(h, ".workflow-agent-state")).toContain("reported cancelled");
+    expect(text(h, ".workflow-agent-state")).toBe("Plan · cancelled · 0 tokens");
     expect(h.doc.querySelector(".workflow-card")!.classList.contains("run-progress-cancelled")).toBe(true);
     expect(h.doc.querySelectorAll(".workflow-card .run-progress-btn")).toHaveLength(0);
+  });
+  it("keeps state-change evidence without denying an unchanged positive token total", () => {
+    const h = replay();
+    for (const i of [4, 5, 6]) {
+      const update = parseRunProgressUpdate(frames[i])!;
+      dispatch(h.window, { type: "runProgress", update: {
+        ...update, agents: update.agents!.map((agent) => ({ ...agent, tokensUsed: 288307 })),
+      } });
+    }
+    expect(text(h, ".workflow-card .workflow-agent-state")).toBe("Plan · cancelled · 288K tokens");
+    expect(text(h, ".workflow-card .workflow-agent-activity")).toBe("state changed 0s ago");
   });
 });

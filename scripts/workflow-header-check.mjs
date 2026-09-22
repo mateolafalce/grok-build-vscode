@@ -36,7 +36,10 @@ try {
           kind: "workflow", id: "header-check", displayName: "deep-research", phase: "running",
           currentPhase: "Verify", elapsedMs: 106000, done: false,
           phases: ["Plan", "Research", "Verify", "Report"].map(title => ({ title, state: title === "Verify" ? "active" : "pending" })),
-          agents: Array.from({ length: 16 }, (_, i) => ({ id: `a${i}`, label: `Researcher ${i}`, state: "running" })),
+          agents: Array.from({ length: 16 }, (_, i) => ({
+            id: `a${i}`, label: `Researcher ${i}`, phase: i === 0 ? "Plan" : "Research",
+            state: "done", tokensUsed: i === 0 ? 23552 : 288307,
+          })),
         },
       } })));
       const header = page.locator(".workflow-pin-run > .workflow-heading");
@@ -46,6 +49,16 @@ try {
       assert.equal(await header.locator(".run-progress-elapsed").textContent(), "1:46");
       await header.locator("button").click();
       assert.equal(await phase.evaluate(el => getComputedStyle(el).clipPath), "inset(50%)");
+      const rows = page.locator(".workflow-pin-run .workflow-agent");
+      for (const row of await rows.all()) {
+        await row.locator("button").click();
+        assert.doesNotMatch(await row.locator(".workflow-agent-activity").innerText(), /no token activity observed/,
+          "a positive token total must not appear beside a no-activity claim");
+        assert.doesNotMatch(await row.locator(".workflow-agent-state").innerText(), /reported/,
+          "agent states must omit the reported prefix");
+      }
+      assert.equal(await rows.nth(0).locator(".workflow-agent-state").innerText(), "Plan · done · 23.55K tokens");
+      assert.equal(await rows.nth(1).locator(".workflow-agent-state").innerText(), "Research · done · 288K tokens");
       const checkLayout = async () => page.evaluate(() => {
         const card = document.querySelector(".workflow-pin-run");
         const header = card.querySelector(".workflow-heading");
@@ -92,7 +105,7 @@ try {
       passed++;
     }
   }
-  console.log(`${passed} phone header layout/paint cases passed (320/390px, dark/light, fallback/translucent/opaque fills)`);
+  console.log(`${passed} phone header layout/paint and agent text cases passed (320/390px, dark/light, fallback/translucent/opaque fills)`);
 } finally {
   await browser.close();
 }

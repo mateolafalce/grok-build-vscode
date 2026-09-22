@@ -100,8 +100,8 @@ describe("approved workflow states", () => {
     expect([...pin(h).querySelectorAll(".workflow-phase")].map((p) => p.textContent)).toEqual(base.phases.map((p) => p.title));
     const rows = [...pin(h).querySelectorAll(".workflow-agent")];
     expect(rows).toHaveLength(2);
-    expect(rows[0].querySelector("button")!.textContent).toContain("Research \u00b7 reported running \u00b7 0 tokens");
-    expect(rows[1].querySelector("button")!.textContent).toContain("19,638 tokens");
+    expect(rows[0].querySelector("button")!.textContent).toContain("Research \u00b7 running \u00b7 0 tokens");
+    expect(rows[1].querySelector("button")!.textContent).toContain("19.64K tokens");
     expect(hidden(rows[0].querySelector(".workflow-agent-detail"))).toBe(true);
     click(h.window, rows[0].querySelector("button")!);
     expect(hidden(rows[0].querySelector(".workflow-agent-detail"))).toBe(false);
@@ -147,6 +147,26 @@ describe("approved workflow states", () => {
 });
 
 describe("workflow evidence", () => {
+  it("does not deny token activity when the first snapshot already has a positive total", () => {
+    const h = boot();
+    send(h, { agents: [{ ...base.agents[0], tokens_used: 23552 }] }); expand(h);
+    click(h.window, agent(h).querySelector("button")!);
+    expect(agent(h).querySelector(".workflow-agent-state")!.textContent).toContain("23.55K tokens");
+    expect(activity(h)).toBe("");
+  });
+  it("renders a done agent state without the reported prefix", () => {
+    const h = boot();
+    send(h, { agents: [{ ...base.agents[0], phase: "Plan", state: "done" }] });
+    expect(agent(h).querySelector(".workflow-agent-state")!.textContent).toBe("Plan · done · 0 tokens");
+  });
+  it.each([
+    [1000, "1K"], [23552, "23.55K"], [99999, "100K"], [100000, "100K"],
+    [288307, "288K"], [999500, "1M"], [1200000, "1.2M"],
+  ])("formats %i agent tokens like the context window (%s)", (tokens, formatted) => {
+    const h = boot();
+    send(h, { agents: [{ ...base.agents[0], tokens_used: tokens }] });
+    expect(agent(h).querySelector(".workflow-agent-state")!.textContent).toBe(`Research · running · ${formatted} tokens`);
+  });
   it("ages token events independently of receipts and duplicate revisions", () => {
     const h = boot(); send(h, { revision: 1 });
     const moved = { revision: 2, agents: [{ ...base.agents[0], tokens_used: 12 }] };
@@ -179,9 +199,9 @@ describe("workflow evidence", () => {
     const anonymous = { label: "Researcher", state: "running", tokens_used: 0 };
     send(h, { agents: [anonymous, anonymous] });
     send(h, { agents: [{ ...anonymous, tokens_used: 15 }, anonymous] });
-    expect(activity(h)).toBe("no token activity observed");
+    expect(activity(h)).toBe("");
     send(h, { agents: [{ agent_id: "new", ...anonymous, tokens_used: 20 }] });
-    expect(activity(h)).toBe("no token activity observed");
+    expect(activity(h)).toBe("");
   });
   it.each(["failed", "permission_blocked", "waiting_for_permission", "awaiting_approval"])("keeps %s on its agent row", (state) => {
     const h = boot(); send(h, { agents: [{ ...base.agents[0], state }] });
@@ -203,7 +223,7 @@ describe("workflow evidence", () => {
     expect(h.doc.querySelector(".workflow-pin")).not.toBeNull();
     // No age, because none is known -- and not a finished run's wording either.
     expect(receipt(h)).toBe("no update since this view opened");
-    expect(activity(h)).toBe("no token activity observed");
+    expect(activity(h)).toBe("");
     // The handle is what a control needs; the host owns the run either way.
     const buttons = [...pin(h).querySelectorAll<HTMLButtonElement>(".run-progress-btn")];
     expect(buttons.map(b => b.textContent)).toEqual(["Pause", "Stop"]);
@@ -248,10 +268,10 @@ describe("reported capabilities", () => {
     send(h, { phases: undefined, current_phase: undefined, elapsed_ms: undefined, agents: undefined, agents_used: undefined, agent_budget: undefined });
     expect(pin(h).querySelector('[data-run-id="r1"] .run-progress-phase')!.textContent).toBe("");
   });
-  it("formats all workflow and goal counts with separators", () => {
+  it("formats agent and deliverable budgets with separators", () => {
     const h = boot(); send(h, { agents_used: 1234, agent_budget: 20000, agents: [{ ...base.agents[0], tokens_used: 19638 }] }); expand(h);
     expect(pin(h).textContent).toContain("1,234 of 20,000 agents used");
-    expect(agent(h).textContent).toContain("19,638 tokens");
+    expect(agent(h).textContent).toContain("19.64K tokens");
     dispatch(h.window, { type: "runProgress", update: parseRunProgressUpdate({ sessionUpdate: "goal_updated", completed_deliverables: 1234, total_deliverables: 20000 }) });
     expect(h.doc.querySelector('.run-progress-card:not(.workflow-card):not(.workflow-pin-run)')!.textContent).toContain("1,234/20,000 deliverables");
   });
