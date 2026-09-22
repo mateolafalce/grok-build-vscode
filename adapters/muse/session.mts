@@ -12,6 +12,16 @@ import { Approvals } from "./approvals.mjs";
  */
 const CHILD_EXIT_BUDGET_MS = 2000;
 
+/**
+ * Windows command shims are scripts, not binaries: Node has refused to spawn
+ * a `.cmd`/`.bat` directly since CVE-2024-27980. `src/cli-process.ts` carries
+ * the same rule for the host, but the adapter compiles under its own tsconfig
+ * whose rootDir is `adapters/muse`, so it cannot import that file.
+ */
+function museCliNeedsShell(cliPath: string, platform = process.platform): boolean {
+  return platform === "win32" && /\.(cmd|bat)$/i.test(cliPath);
+}
+
 function childExitTimeout(): Promise<undefined> {
   return new Promise<undefined>(resolve => {
     const timer = setTimeout(() => resolve(undefined), CHILD_EXIT_BUDGET_MS);
@@ -70,7 +80,14 @@ export class MuseSession {
   private async start(): Promise<void> {
     const executable = process.env.MUSE_CODE_EXECUTABLE;
     if (!executable) throw new Error("MUSE_CODE_EXECUTABLE must name the installed Muse CLI");
-    const handshake = this.handshake = this.spawn({ command: executable, args: ["serve"],
+    // The SDK spawns the command itself and exposes neither `shell` nor
+    // `windowsVerbatimArguments`, so the shim is wrapped here instead. The
+    // executable and `serve` stay SEPARATE argv entries: Node quotes each one
+    // on its own, which is what carries an install path containing a space.
+    const needsShell = museCliNeedsShell(executable);
+    const handshake = this.handshake = this.spawn({
+      command: needsShell ? process.env.COMSPEC || "cmd.exe" : executable,
+      args: needsShell ? ["/d", "/s", "/c", executable, "serve"] : ["serve"],
       cwd: process.cwd(), env: process.env,
       onStderr: chunk => process.stderr.write(chunk) });
     handshake.onNotification(notification => {

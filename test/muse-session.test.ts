@@ -3,7 +3,11 @@ import { MuseSession } from "../adapters/muse/session.mts";
 
 // The session tests inject a fake SDK connection; no vendor executable is used.
 vi.mock("@muse-code/sdk", () => ({ spawnMspConnection: () => { throw new Error("inject the fake spawn"); } }));
-afterEach(() => vi.unstubAllEnvs());
+const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
+afterEach(() => {
+  vi.unstubAllEnvs();
+  Object.defineProperty(process, "platform", platformDescriptor);
+});
 
 function deferred<T>() {
   let resolve!: (value: T) => void, reject!: (error: unknown) => void;
@@ -32,10 +36,10 @@ function setup() {
     initialize: vi.fn(async () => ({ connection, initializeResult: { serverInfo: { name: "muse", version: "1.3.0" } } })),
     close: vi.fn(async () => exited.promise) };
   const client = { notify: vi.fn(async () => {}), request: vi.fn() };
-  const logs: string[] = [], fatal = vi.fn(), spawn = vi.fn(() => handshake);
+  const logs: string[] = [], fatal = vi.fn(), spawn = vi.fn((_options: { command: string; args: string[] }) => handshake);
   const session = new MuseSession(client as any, message => logs.push(message), fatal, spawn as any);
   const event = (method: string, params: any = {}) => notify({ method, params: { sessionId: "session", ...params } });
-  return { session, handshake, client, logs, fatal, event, admission, exited, closed, command, connection, description, protocolError: (e: Error) => protocolError(e) };
+  return { session, spawn, handshake, client, logs, fatal, event, admission, exited, closed, command, connection, description, protocolError: (e: Error) => protocolError(e) };
 }
 
 async function ready() {
@@ -44,6 +48,57 @@ async function ready() {
   const result = await s.session.newSession("/workspace", []);
   return { ...s, result };
 }
+
+describe("Muse CLI spawn", () => {
+  it.each([
+    ["win32", String.raw`C:\Users\Dell\AppData\Local\Programs\muse\muse.cmd`],
+    ["win32", String.raw`C:\Users\Dell User\AppData\Local\Programs\muse\muse.CMD`],
+  ])("wraps %s shim %s with separate executable and serve arguments", async (platform, executable) => {
+    const s = setup();
+    Object.defineProperty(process, "platform", { value: platform });
+    vi.stubEnv("MUSE_CODE_EXECUTABLE", executable);
+    const comspec = String.raw`C:\Windows\System32\cmd.exe`;
+    vi.stubEnv("COMSPEC", comspec);
+    await s.session.initialize();
+    expect(s.spawn).toHaveBeenCalledOnce();
+    const { command, args } = s.spawn.mock.calls[0][0];
+    expect({ command, args }).toEqual({
+      command: comspec, args: ["/d", "/s", "/c", executable, "serve"],
+    });
+  });
+
+  it("wraps a win32 .bat with cmd.exe when COMSPEC is absent", async () => {
+    const s = setup();
+    Object.defineProperty(process, "platform", { value: "win32" });
+    const executable = String.raw`C:\muse\muse.bat`;
+    vi.stubEnv("MUSE_CODE_EXECUTABLE", executable);
+    vi.stubEnv("COMSPEC", "");
+    delete process.env.COMSPEC;
+    await s.session.initialize();
+    expect(s.spawn).toHaveBeenCalledOnce();
+    const { command, args } = s.spawn.mock.calls[0][0];
+    expect({ command, args }).toEqual({
+      command: "cmd.exe", args: ["/d", "/s", "/c", executable, "serve"],
+    });
+  });
+
+  it.each([
+    ["win32", String.raw`C:\muse\muse.exe`],
+    ["linux", "/home/u/.local/bin/muse"],
+    ["darwin", "/home/u/.local/bin/muse"],
+    ["linux", "/home/u/.local/bin/muse.cmd"],
+  ])("launches %s executable %s directly", async (platform, executable) => {
+    const s = setup();
+    Object.defineProperty(process, "platform", { value: platform });
+    vi.stubEnv("MUSE_CODE_EXECUTABLE", executable);
+    await s.session.initialize();
+    expect(s.spawn).toHaveBeenCalledOnce();
+    const { command, args } = s.spawn.mock.calls[0][0];
+    expect({ command, args }).toEqual({
+      command: executable, args: ["serve"],
+    });
+  });
+});
 
 describe("Muse turn admission and process ownership", () => {
   it("requests no capabilities and preserves the complete model description", async () => {

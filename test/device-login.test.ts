@@ -235,6 +235,37 @@ function fakeIo(): { io: DeviceLoginIo; child: FakeChild; calls: unknown[][] } {
   return { io, child, calls };
 }
 
+describe("device login shell policy", () => {
+  const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
+  afterEach(() => Object.defineProperty(process, "platform", platformDescriptor));
+
+  it.each([
+    ["win32", String.raw`C:\Users\Dell\AppData\Local\Programs\muse\muse.cmd`, true],
+    ["win32", String.raw`C:\muse\muse.BAT`, true],
+    ["win32", String.raw`C:\muse\muse.exe`, false],
+    ["linux", "/home/u/.local/bin/muse", false],
+    ["darwin", "/home/u/.local/bin/muse", false],
+    ["linux", "/home/u/.local/bin/muse.cmd", false],
+  ] as const)("on %s launches %s with shell=%s", (platform, executable, shell) => {
+    Object.defineProperty(process, "platform", { value: platform });
+    const { io, child, calls } = fakeIo();
+    runDeviceLogin(executable, ["login"], { onPrompt: vi.fn(), onDone: vi.fn() }, io, {});
+    child.emit("close", 0);
+    expect(calls[0]).toEqual([executable, ["login"], expect.objectContaining({ shell })]);
+  });
+
+  it("keeps Claude paste-code stdin piped through the win32 shell", () => {
+    Object.defineProperty(process, "platform", { value: "win32" });
+    const { io, child, calls } = fakeIo();
+    const handle = runDeviceLogin(String.raw`C:\claude\claude.cmd`, ["auth", "login"],
+      { onPrompt: vi.fn(), onDone: vi.fn() }, io, {}, { needsCode: true });
+    handle.submitCode("  paste-me-now  ");
+    child.emit("close", 0);
+    expect(calls[0][2]).toMatchObject({ shell: true, stdio: ["pipe", "pipe", "pipe"] });
+    expect(child.stdin.writes).toEqual(["paste-me-now\n"]);
+  });
+});
+
 describe("running one", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
