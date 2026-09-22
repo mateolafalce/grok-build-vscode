@@ -14048,7 +14048,12 @@
       row.dataset.agentIndex = String(i);
       row.dataset.state = agent.state || "unknown";
       const activity = workflowAgentActivity(record, agent);
-      const hasDetails = !!activity;
+      // A finished run has nothing behind the row worth opening -- the detail
+      // is the live activity line, which reads "tokens moved" and no more.
+      // It also only EXISTS when this view watched the run finish: activity is
+      // recorded off the live rail only, so the same report drew chevrons or
+      // not depending on whether you happened to be looking. Now neither does.
+      const hasDetails = !!activity && !record.update.done;
       if (row._hasDetails !== hasDetails) row.replaceChildren();
       row._hasDetails = hasDetails;
       if (!row.firstChild) {
@@ -14112,6 +14117,11 @@
     }
   }
 
+  function syncWorkflowReportChevron(report) {
+    const chevron = report.querySelector(".workflow-report-chevron");
+    if (chevron) chevron.innerHTML = report.open ? ICON.chevronDown : ICON.chevronRight;
+  }
+
   function renderWorkflowTranscript(el, record) {
     const u = record.update;
     const name = u.title && u.title !== u.id ? u.title : u.displayName || "Workflow";
@@ -14131,12 +14141,36 @@
     if (!report) {
       el.replaceChildren();
       report = workflowText(el, "workflow-report", "", "details");
-      workflowText(report, "workflow-report-toggle", "", "summary");
+      const summary = workflowText(report, "workflow-report-toggle", "", "summary");
+      // The same parts the live card uses, in the same order. A finished run
+      // used to be a bare string beside the browser's OWN <details> marker --
+      // a different glyph, on the opposite side, from every card still running.
+      // Nobody chose two affordances; one of them was the UA default showing
+      // through, which is also why the elapsed time and the steps vanished.
+      // Deliberately NOT the live card's class names. `.workflow-card
+      // .run-progress-phase` would otherwise match the body's copy and this
+      // one, with different meanings, and every existing assertion about the
+      // body would quietly start reading the summary instead.
+      summary.innerHTML = `<span class="workflow-report-name"></span><span class="workflow-report-dots"></span><span class="workflow-report-state"></span><span class="workflow-report-elapsed" hidden></span><span class="workflow-report-chevron" aria-hidden="true"></span>`;
+      report.addEventListener("toggle", () => syncWorkflowReportChevron(report));
       workflowText(report, "workflow-report-body", "");
     }
-    report.querySelector("summary").textContent = `${name} · ${u.failed ? "failed" : u.cancelled ? "cancelled" : "done"}`;
+    const summary = report.querySelector(".workflow-report-toggle");
+    summary.querySelector(".workflow-report-name").textContent = name;
+    summary.querySelector(".workflow-report-state").textContent = u.failed ? "failed" : u.cancelled ? "cancelled" : "done";
     const body = report.querySelector(".workflow-report-body");
     renderWorkflowSurface(body, record);
+    // The body already resolves each step's TERMINAL state for a finished run
+    // (a surviving current_phase must not leave one step looking active), so
+    // clone that rail instead of deriving the same thing a second time.
+    const rail = summary.querySelector(".workflow-report-dots");
+    const resolved = body.querySelector(".workflow-dots");
+    rail.replaceChildren(...[...resolved.children].map((dot) => dot.cloneNode(true)));
+    rail.hidden = !rail.children.length;
+    const reportElapsed = summary.querySelector(".workflow-report-elapsed");
+    reportElapsed.hidden = !Number.isFinite(u.elapsedMs);
+    reportElapsed.textContent = reportElapsed.hidden ? "" : workflowElapsed(u.elapsedMs);
+    syncWorkflowReportChevron(report);
     // Finished reports have one disclosure, with all fixed content inside it.
     body.querySelector(".run-progress-title").hidden = true;
     body.querySelector(".workflow-dots").hidden = true;

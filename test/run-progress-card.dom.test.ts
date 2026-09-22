@@ -120,7 +120,20 @@ describe("approved workflow states", () => {
     });
     expect(h.doc.querySelector(".workflow-pin")).toBeNull();
     expect(card(h)).toBe(original);
-    expect(card(h).querySelector("summary")?.textContent).toBe("deep-research · done");
+    // The collapsed report is built from the live card's own parts, so a
+    // finished run reports its duration and its steps WITHOUT being opened.
+    // It used to be a bare string beside the browser's native <details>
+    // marker: a different glyph, on the other side, from every running card.
+    const summary = card(h).querySelector("summary")!;
+    expect({
+      name: summary.querySelector(".workflow-report-name")?.textContent,
+      state: summary.querySelector(".workflow-report-state")?.textContent,
+      elapsed: summary.querySelector(".workflow-report-elapsed")?.textContent,
+      chevron: !!summary.querySelector(".workflow-report-chevron"),
+      steps: [...summary.querySelectorAll(".workflow-report-dots .workflow-dot")]
+        .map((d) => (d as HTMLElement).dataset.state),
+    }).toEqual({ name: "deep-research", state: "done", elapsed: "12:08", chevron: true,
+      steps: ["done", "done", "done", "done"] });
     expect(card(h).querySelector(".workflow-marker, .run-progress-btn, [aria-current]")).toBeNull();
     expect([...card(h).querySelectorAll(".workflow-phase")].map((p) => p.getAttribute("data-state")))
       .toEqual(["done", "done", "done", "done"]);

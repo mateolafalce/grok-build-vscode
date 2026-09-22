@@ -2859,7 +2859,17 @@ body.thinking-hidden .msg.thinking { display: none; }
 .workflow-marker { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
 .workflow-marker > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .workflow-card:not(.run-progress-done) { border: 0; padding: 4px 0; background: none; }
-.workflow-report-toggle { cursor: pointer; font-weight: 600; }
+.workflow-report-toggle { cursor: pointer; font-weight: 600; display: flex; align-items: center; gap: 9px; }
+/* The native disclosure triangle sits on the LEFT and is not our chevron; the
+   summary draws its own on the right so a finished card matches a live one. */
+.workflow-report-toggle { list-style: none; }
+.workflow-report-toggle::-webkit-details-marker { display: none; }
+.workflow-report-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workflow-report-dots { display: inline-flex; flex-wrap: wrap; gap: 5px; align-items: center; flex: none; }
+.workflow-report-state { font-weight: 400; opacity: 0.75; }
+.workflow-report-elapsed { margin-left: auto; font-variant-numeric: tabular-nums; opacity: 0.75; }
+.workflow-report-chevron { flex: none; display: inline-flex; align-items: center; }
+.workflow-report-dots[hidden], .workflow-report-elapsed[hidden] { display: none; }
 .workflow-report-body { margin-top: 6px; }
 .workflow-agent-toggle { display: flex; align-items: baseline; gap: 6px; width: 100%; border: 0; padding: 4px 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; white-space: nowrap; }
 .workflow-agent-name { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; }

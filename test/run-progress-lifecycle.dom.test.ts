@@ -91,7 +91,7 @@ describe("completion without a terminal notification", () => {
       // Discard the live client's replaceOnly-patched prefix, as a focus switch
       // or reload does. Only the host buffer can make this second replay safe.
       replayBuffer();
-      const order = () => [...h.doc.querySelectorAll(".msg.user .body, .workflow-report-toggle")].map(el => el.textContent);
+      const order = () => [...h.doc.querySelectorAll(".msg.user .body, .workflow-report-name")].map(el => el.textContent);
       expect({ order: order(), card: h.doc.querySelector(".workflow-card"),
         prefix: (h.window as any).__grokHistory.prefixRemaining() })
         .toEqual({ order: later, card: null, prefix: 2 });
@@ -102,7 +102,7 @@ describe("completion without a terminal notification", () => {
       messages.dispatchEvent(new h.window.Event("scroll"));
       expect({ order: order(), pin: h.doc.querySelector(".workflow-pin, .workflow-marker, .run-progress-btn, [aria-current=step]"),
         reports: [...h.doc.querySelectorAll(".workflow-report")].map(el => (el as HTMLDetailsElement).open),
-      }).toEqual({ order: ["Before run", "captured-research-1 · done", "During run", ...later], pin: null, reports: [false] });
+      }).toEqual({ order: ["Before run", "captured-research-1", "During run", ...later], pin: null, reports: [false] });
     } finally {
       vi.unstubAllEnvs();
       rmSync(dir, { recursive: true, force: true });
@@ -122,13 +122,13 @@ describe("completion without a terminal notification", () => {
     dispatch(h.window, { type: "userMessage", text: "After run" });
     dispatch(h.window, { type: "historyReplay", active: false });
     dispatch(h.window, { type: "runProgress", update: { ...update, done: true, phase: "completed" }, replaceOnly: true });
-    const visible = [...h.doc.querySelectorAll(".msg.user .body, .workflow-report-toggle")].map(el => el.textContent);
+    const visible = [...h.doc.querySelectorAll(".msg.user .body, .workflow-report-name")].map(el => el.textContent);
     (h.window as any).__grokHistory.expandAll();
     expect({ visible,
-      expanded: [...h.doc.querySelectorAll(".msg.user .body, .workflow-report-toggle")].map(el => el.textContent),
+      expanded: [...h.doc.querySelectorAll(".msg.user .body, .workflow-report-name")].map(el => el.textContent),
       pin: h.doc.querySelector(".workflow-pin, .workflow-marker, .run-progress-btn"),
     }).toEqual({ visible: ["After run"],
-      expanded: surface === "desk" ? ["Before run", "captured-research-1 · done", "After run"] : ["After run"], pin: null });
+      expanded: surface === "desk" ? ["Before run", "captured-research-1", "After run"] : ["After run"], pin: null });
   });
 
   it.each(["live", "unobserved completion", "cold replay", "browser reload"])("repairs from disk in the middle of the transcript and replays closed reports in order (%s)", (mode) => {
@@ -189,8 +189,8 @@ describe("completion without a terminal notification", () => {
       } else sidebar.sendRemoteHistorySnapshot(session);
       dispatch(h.window, { type: "historyReplay", active: false });
       expect(h.doc.querySelector(".workflow-pin, .workflow-marker, .run-progress-btn, [aria-current=step]")).toBeNull();
-      expect([...h.doc.querySelectorAll(".workflow-report-toggle")].map(el => el.textContent))
-        .toEqual(["captured-research-1 · done", "captured-research-2 · done"]);
+      expect([...h.doc.querySelectorAll(".workflow-report-name")].map(el => el.textContent))
+        .toEqual(["captured-research-1", "captured-research-2"]);
       expect([...h.doc.querySelectorAll("details")].map(el => el.open)).toEqual([false, false]);
       expect([...h.doc.querySelectorAll(".workflow-phase")].map(el => el.getAttribute("data-state")))
         .toEqual(Array(8).fill("done"));
@@ -207,10 +207,10 @@ describe("completion without a terminal notification", () => {
       expect({
         bufferOrder: session.buffer.map(m => m.type === "runProgress" ? `${m.update.title}: ${m.update.done}`
           : m.type === "userMessage" ? m.text : m.type),
-        replayOrder: [...restored.doc.querySelectorAll(".msg.user .body, .workflow-report-toggle")].map(el => el.textContent),
+        replayOrder: [...restored.doc.querySelectorAll(".msg.user .body, .workflow-report-name")].map(el => el.textContent),
       }).toEqual({
         bufferOrder: ["Start captured-research-1", "captured-research-1: true", "Start captured-research-2", "captured-research-2: true", "Later conversation"],
-        replayOrder: ["Start captured-research-1", "captured-research-1 · done", "Start captured-research-2", "captured-research-2 · done", "Later conversation"],
+        replayOrder: ["Start captured-research-1", "captured-research-1", "Start captured-research-2", "captured-research-2", "Later conversation"],
       });
     } finally {
       clearInterval(sidebar.workflowTimer);
@@ -230,8 +230,8 @@ describe("completion without a terminal notification", () => {
     dispatch(h.window, { type: "historyReplay", active: false });
     expect(h.doc.querySelector(".workflow-pin, .workflow-marker, .run-progress-btn")).toBeNull();
     expect([...h.doc.querySelectorAll(".workflow-report")].map(el => (el as HTMLDetailsElement).open)).toEqual([false, false]);
-    expect([...h.doc.querySelectorAll(".workflow-report-toggle")].map(el => el.textContent))
-      .toEqual(["demo-stages · done", "demo-stages-2 · done"]);
+    expect([...h.doc.querySelectorAll(".workflow-report-name")].map(el => el.textContent))
+      .toEqual(["demo-stages", "demo-stages-2"]);
   });
 });
 
@@ -250,7 +250,7 @@ describe("the captured workflow lifecycle", () => {
     h.frame(2);
     dispatch(h.window, { type: "historyReplay", active: false });
     expect(h.doc.querySelector(".workflow-pin, .workflow-marker, [aria-current=step]")).toBeNull();
-    expect(text(h, ".workflow-report-toggle")).toBe("deep-research · done");
+    expect(text(h, ".workflow-report-name")).toBe("deep-research");
     expect(text(h, ".workflow-card .run-progress-elapsed")).toBe("6:30");
     expect(text(h, ".workflow-card .workflow-output-body")).toBe("Partial");
     expect(text(h, ".workflow-card .workflow-spend")).toBe("6 of 16 agents used");

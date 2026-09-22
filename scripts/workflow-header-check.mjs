@@ -156,7 +156,17 @@ try {
       assert.equal(await page.locator(".workflow-pin, .workflow-marker, .run-progress-btn").count(), 0);
       const report = page.locator(".workflow-report");
       assert.equal(await report.evaluate(el => el.open), false, "settled report must arrive closed");
-      assert.equal(await report.locator("summary").textContent(), "deep-research · done");
+      assert.equal(await report.locator(".workflow-report-name").textContent(), "deep-research");
+      assert.equal(await report.locator(".workflow-report-state").textContent(), "done");
+      // The finished card reports its duration without being opened, and
+      // draws OUR chevron on the right rather than the UA details marker.
+      assert.equal(await report.locator(".workflow-report-elapsed").textContent(), "6:30");
+      assert.equal(await report.locator(".workflow-report-chevron svg").count(), 1);
+      assert.equal(await report.locator(".workflow-report-dots .workflow-dot").count(), 4);
+      assert.deepEqual(await report.locator(".workflow-report-dots .workflow-dot").evaluateAll(
+        (dots) => dots.map((d) => d.dataset.state)), ["done", "done", "done", "done"]);
+      assert.equal(await report.locator("summary").evaluate(
+        (el) => getComputedStyle(el).listStyleType), "none");
       await report.locator("summary").click();
       assert.equal(await report.locator('.workflow-phase[data-state="done"]').count(), 4);
       assert.equal(await report.locator('[aria-current="step"]').count(), 0);
@@ -199,7 +209,7 @@ try {
         }, { runs: statelessRuns, historical });
         assert.equal(await page.locator(".workflow-pin, .workflow-marker, .run-progress-btn").count(), 0);
         assert.deepEqual(await page.locator(".workflow-report").evaluateAll(els => els.map(el => el.open)), [false, false]);
-        assert.deepEqual(await page.locator(".workflow-report-toggle").allTextContents(), ["demo-stages · done", "demo-stages-2 · done"]);
+        assert.deepEqual(await page.locator(".workflow-report-name").allTextContents(), ["demo-stages", "demo-stages-2"]);
         for (const report of await page.locator(".workflow-report").all()) await report.locator("summary").click();
         assert.equal(await page.locator('.workflow-phase[data-state="done"]').count(), 4);
         assert.equal(await page.locator(".workflow-agent button, .workflow-agent-chevron").count(), 0);
