@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MuseSession } from "../adapters/muse/session.mts";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+import { AcpClient } from "../src/acp";
+import { MuseBackend } from "../src/muse-backend";
 
 // The session tests inject a fake SDK connection; no vendor executable is used.
 vi.mock("@muse-code/sdk", () => ({ spawnMspConnection: () => { throw new Error("inject the fake spawn"); } }));
@@ -48,6 +53,87 @@ async function ready() {
   const result = await s.session.newSession("/workspace", []);
   return { ...s, result };
 }
+
+describe("Muse reasoning effort", () => {
+  const levels = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"] as const;
+
+  it("advertises the SDK vocabulary in order as value objects on every model", async () => {
+    const require = createRequire(import.meta.url);
+    const schema = readFileSync(join(dirname(require.resolve("@muse-code/sdk")), "msp.d.ts"), "utf8");
+    const vocabulary = schema.match(/export type ReasoningEffort = ([^;]+);/)![1];
+    expect([...vocabulary.matchAll(/"([^"]+)"/g)].map(match => match[1])).toEqual(levels);
+    const s = await ready();
+    s.connection.request.mockResolvedValue({ models: [
+      { modelId: "one", isDefault: true, contextLimit: 100 }, { modelId: "two", contextLimit: 200 },
+    ] } as any);
+    const models = await s.session.models();
+    expect(models.currentModelId).toBe("one");
+    expect(models.availableModels.map((m: any) => m._meta)).toEqual([100, 200].map(totalContextTokens => ({
+      totalContextTokens, supportsReasoningEffort: true, reasoningEfforts: levels.map(value => ({ value })),
+    })));
+  });
+
+  it("sends each effort verbatim to MSP and reflects only the accepted current value", async () => {
+    const s = await ready();
+    s.command.mockResolvedValue({ status: "accepted" } as any);
+    for (const level of levels) {
+      await expect(s.session.setReasoningEffort("session", level)).resolves.toEqual({});
+      expect(s.command).toHaveBeenLastCalledWith("session/setReasoningEffort", { sessionId: "session", reasoningEffort: level });
+      expect((await s.session.models("default-model")).availableModels[0]._meta.reasoningEffort).toBe(level);
+    }
+  });
+
+  it("rejects a refused effort clearly without changing the value or killing the session", async () => {
+    const s = await ready();
+    s.command.mockResolvedValueOnce({ status: "accepted" } as any);
+    await s.session.setReasoningEffort("session", "low");
+    for (const status of ["rejected", "future-status", undefined]) {
+      s.command.mockResolvedValueOnce({ status } as any);
+      await expect(s.session.setReasoningEffort("session", "ultra")).rejects.toThrow('Muse reasoning effort "ultra" was rejected');
+      expect((await s.session.models("default-model")).availableModels[0]._meta.reasoningEffort).toBe("low");
+    }
+    expect(s.fatal).not.toHaveBeenCalled();
+    s.command.mockResolvedValueOnce({ status: "accepted" } as any);
+    await expect(s.session.setReasoningEffort("session", "medium")).resolves.toEqual({});
+  });
+
+  it("refuses an effort for a foreign session before sending MSP", async () => {
+    const s = await ready();
+    s.command.mockClear();
+    await expect(s.session.setReasoningEffort("foreign", "high")).rejects.toThrow("Unknown Muse session");
+    expect(s.command).not.toHaveBeenCalled();
+  });
+
+  it("restores snapshot effort only on the current model", async () => {
+    const s = setup();
+    await s.session.initialize();
+    s.command.mockResolvedValue({ session: { sessionId: "session", workspaceRoot: "/workspace", modelId: "default-model" },
+      history: { mode: "snapshot", snapshot: { state: { items: [], reasoningEffort: { reasoningEffort: "max", source: "user" } } } },
+    } as any);
+    const result = await s.session.loadSession("session", "/workspace", []);
+    expect(result._meta.models.availableModels[0]._meta.reasoningEffort).toBe("max");
+    expect((await s.session.models("another-model")).availableModels[0]._meta).not.toHaveProperty("reasoningEffort");
+  });
+
+  it("carries the advertised menu and accepted effort through the ACP host", async () => {
+    const s = await ready();
+    const host = new AcpClient({ cliPath: "/unused", cwd: "/workspace", backend: new MuseBackend(), log: () => {} });
+    vi.spyOn(host as any, "request").mockImplementation(async (method: string, params: any) => {
+      if (method === "session/new") return s.result;
+      if (method === "session/set_config_option") return s.session.setReasoningEffort(params.sessionId, params.value);
+      throw new Error(`Unexpected request: ${method}`);
+    });
+    await host.newSession();
+    expect(host.availableModels[0].reasoningEfforts).toEqual(levels);
+    expect(host.currentModelSupportsEffort()).toBe(true);
+    s.command.mockResolvedValueOnce({ status: "accepted" } as any);
+    await expect(host.setReasoningEffort("ultra")).resolves.toBe(true);
+    expect(host.currentReasoningEffort).toBe("ultra");
+    s.command.mockResolvedValueOnce({ status: "rejected" } as any);
+    await expect(host.setReasoningEffort("max")).rejects.toThrow('Muse reasoning effort "max" was rejected');
+    expect(host.currentReasoningEffort).toBe("ultra");
+  });
+});
 
 describe("Muse CLI spawn", () => {
   it.each([

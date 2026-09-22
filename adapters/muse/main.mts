@@ -1,6 +1,6 @@
 import { Readable, Writable } from "node:stream";
 import { agent, ndJsonStream } from "@agentclientprotocol/sdk";
-import { MuseSession } from "./session.mjs";
+import { MuseSession, REASONING_EFFORTS } from "./session.mjs";
 
 const log = (message: string) => { process.stderr.write(`${message}\n`); };
 let session: MuseSession;
@@ -31,6 +31,14 @@ const app = agent()
     if (!p || typeof p.sessionId !== "string" || typeof p.modelId !== "string") throw new Error("Invalid model selection");
     return { sessionId: p.sessionId, modelId: p.modelId };
   }, ({ params }) => session.setModel(params.sessionId, params.modelId))
+  .onRequest("session/set_config_option", (value: unknown) => {
+    const p = value as Record<string, unknown>;
+    const effort = REASONING_EFFORTS.find(level => level === p?.value);
+    if (!p || typeof p.sessionId !== "string" || p.configId !== "reasoning_effort" || !effort) {
+      throw new Error("Invalid Muse reasoning effort selection");
+    }
+    return { sessionId: p.sessionId, value: effort };
+  }, ({ params }) => session.setReasoningEffort(params.sessionId, params.value))
   .onRequest("session/prompt", ({ params }) => session.prompt(params.sessionId, params.prompt))
   .onNotification("session/cancel", async ({ params }) => {
     try { await session.cancel(params.sessionId); } catch (error) { void stop(error); }

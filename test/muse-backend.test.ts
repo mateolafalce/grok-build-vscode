@@ -50,7 +50,9 @@ it("keeps legacy wire ids frozen while internal capabilities distinguish Muse", 
   expect(supportsModeSwitching("muse")).toBe(false);
   expect(usesPerCallContextOccupancy("muse")).toBe(false);
   expect(() => new MuseBackend().setMode("s", "yolo")).toThrow("unavailable");
-  expect(new MuseBackend().setReasoningEffort()).toBeNull();
+  expect(new MuseBackend().setReasoningEffort("s", undefined, "ultra")).toEqual({
+    method: "session/set_config_option", params: { sessionId: "s", configId: "reasoning_effort", value: "ultra" },
+  });
 });
 
 it("lists every page scoped to the requested workspace", async () => {

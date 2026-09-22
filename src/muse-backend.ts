@@ -27,7 +27,9 @@ export class MuseBackend implements AcpBackend<"muse"> {
   setModel(sessionId: string, modelId: string) {
     return { method: "session/set_model", params: { sessionId, modelId } };
   }
-  setReasoningEffort() { return null; }
+  setReasoningEffort(sessionId: string, _modelId: string | undefined, level: string) {
+    return { method: "session/set_config_option", params: { sessionId, configId: "reasoning_effort", value: level } };
+  }
   setMode(_sessionId: string, _modeId: string): never {
     throw new Error("Muse mode switching is unavailable");
   }

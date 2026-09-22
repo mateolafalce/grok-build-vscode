@@ -2,6 +2,14 @@ import { spawnMspConnection, type MspHandshake, type SpawnedMspConnection } from
 import type { AgentContext, ContentBlock, PromptResponse } from "@agentclientprotocol/sdk";
 import { Projection } from "./projection.mjs";
 import { Approvals } from "./approvals.mjs";
+// A deep import because the SDK root re-exports nothing from `msp.js`, and
+// this is the only route to the effort vocabulary. Type-only, so it costs
+// the packaging graph nothing; the disk-read assertion in
+// `test/muse-session.test.ts` is what catches the union changing under us.
+import type { ReasoningEffort } from "@muse-code/sdk/dist/src/msp.js";
+
+// MSP exposes a session-wide vocabulary, with no per-model capability list.
+export const REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"] as const satisfies readonly ReasoningEffort[];
 
 /**
  * How long a closing adapter waits for `muse serve` to actually exit. The host
@@ -44,6 +52,7 @@ export class MuseSession {
   private starting?: Promise<void>;
   private closing?: Promise<void>;
   private sessionId?: string;
+  private reasoningEffort?: ReasoningEffort;
   private activeTurnId?: string;
   private creating = false;
   private replayBuffer?: { method: string; params: Record<string, any> }[];
@@ -143,10 +152,16 @@ export class MuseSession {
   async models(currentModelId?: string) {
     const catalog = await this.connection().request("model/list", {});
     if (!Array.isArray(catalog.models)) throw new Error("Muse model/list returned no models");
-    return { currentModelId: currentModelId ?? catalog.models.find((m: any) => m.isDefault)?.modelId,
+    const activeModelId = currentModelId ?? catalog.models.find((m: any) => m.isDefault)?.modelId;
+    return { currentModelId: activeModelId,
       availableModels: catalog.models.map((model: any) => ({ modelId: model.modelId,
         name: model.displayLabel || model.modelId, description: model.description ?? undefined,
-        _meta: { totalContextTokens: model.contextLimit } })) };
+        _meta: { totalContextTokens: model.contextLimit,
+          supportsReasoningEffort: true,
+          reasoningEfforts: REASONING_EFFORTS.map(value => ({ value })),
+          ...(model.modelId === activeModelId && this.reasoningEffort !== undefined
+            ? { reasoningEffort: this.reasoningEffort } : {}),
+        } })) };
   }
 
   async listSessions(cwd?: string, cursor?: string | null) {
@@ -167,6 +182,14 @@ export class MuseSession {
     return {};
   }
 
+  async setReasoningEffort(sessionId: string, reasoningEffort: ReasoningEffort) {
+    this.assertSession(sessionId);
+    const result = await this.connection().command("session/setReasoningEffort", { sessionId, reasoningEffort });
+    if (result.status !== "accepted") throw new Error(`Muse reasoning effort "${reasoningEffort}" was rejected`);
+    this.reasoningEffort = reasoningEffort;
+    return {};
+  }
+
   async loadSession(sessionId: string, cwd: string, mcpServers: unknown[]) {
     if (this.sessionId || this.creating) throw new Error("Muse adapter already owns a session");
     if (mcpServers.length) throw new Error("Muse adapter does not accept client MCP servers");
@@ -179,6 +202,7 @@ export class MuseSession {
       if (resumed?.sessionId !== sessionId || resumed.workspaceRoot !== cwd) throw new Error("Muse resume workspace/session mismatch");
       this.activeTurnId = resumed.activeTurnId ?? undefined;
       const history = result.history as any;
+      this.reasoningEffort = history?.snapshot?.state?.reasoningEffort?.reasoningEffort;
       const seen = new Set<string>();
       let items: any[];
       if (history?.mode === "inline" && Array.isArray(history.items)) items = history.items;
