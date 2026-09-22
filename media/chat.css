@@ -2763,7 +2763,7 @@ body.thinking-hidden .msg.thinking { display: none; }
   background: linear-gradient(var(--run-progress-fill), var(--run-progress-fill)), var(--vscode-sideBar-background);
 }
 .workflow-pin-run:last-child { margin-bottom: 0; }
-.workflow-expanded[hidden], .workflow-dots[hidden], .workflow-phases[hidden], .workflow-roster[hidden], .workflow-agent-detail[hidden], .workflow-blocked[hidden] { display: none; }
+.workflow-expanded[hidden], .workflow-dots[hidden], .workflow-phases[hidden], .workflow-roster[hidden], .workflow-agent-detail[hidden], .workflow-blocked[hidden], .workflow-chevron[hidden] { display: none; }
 /* Reads immediately under the receipt, because it is what qualifies it. */
 .workflow-blocked { color: var(--vscode-editorWarning-foreground, #cca700); }
 .workflow-tool-marker[hidden] { display: none; }

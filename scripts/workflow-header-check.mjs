@@ -130,6 +130,10 @@ try {
       assert.equal(await report.locator('[aria-current="step"]').count(), 0);
       assert.match(await report.innerText(), /Partial · 6 of 16 agents used/);
       assert.match(await report.locator(".workflow-phase").last().evaluate(el => getComputedStyle(el, "::before").content), /✓/);
+      // A finished report has one disclosure -- the summary. Its own
+      // heading chevron must actually disappear, not just carry `hidden`.
+      assert.equal(await report.locator(".workflow-chevron").evaluate(el => el.checkVisibility()), false,
+        "a finished report keeps a dead heading chevron visible");
       // A run that stopped mid-stage must not paint the interrupted step
       // the same hollow ○ as a step that was never reached.
       await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", { data: {
