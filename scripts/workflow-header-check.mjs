@@ -167,6 +167,11 @@ try {
         (dots) => dots.map((d) => d.dataset.state)), ["done", "done", "done", "done"]);
       assert.equal(await report.locator("summary").evaluate(
         (el) => getComputedStyle(el).listStyleType), "none");
+      // The summary IS the control that opens the report, so it carries the
+      // same coarse-pointer target as the live card's disclosure button. It
+      // did not, and a line of text is not reliably tappable.
+      assert.ok((await report.locator("summary").boundingBox()).height >= 36,
+        "the finished report's summary needs the 36px touch target");
       await report.locator("summary").click();
       assert.equal(await report.locator('.workflow-phase[data-state="done"]').count(), 4);
       assert.equal(await report.locator('[aria-current="step"]').count(), 0);

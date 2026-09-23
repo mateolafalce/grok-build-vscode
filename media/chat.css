@@ -2885,7 +2885,10 @@ body.thinking-hidden .msg.thinking { display: none; }
 .run-progress-card .run-progress-btn:disabled { opacity: 0.55; cursor: default; }
 .workflow-pin-toggle:focus-visible, .workflow-agent-toggle:focus-visible, .workflow-report-toggle:focus-visible, .run-progress-btn:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
 @media (hover: none), (pointer: coarse) {
-  .workflow-pin-toggle, .workflow-agent-toggle, .workflow-pin .run-progress-btn { min-height: 36px; }
+  /* The finished report's summary is the tap target that opens it, so it
+     needs the same target as the live card's disclosure -- a coarse pointer
+     cannot reliably hit a line of text. */
+  .workflow-pin-toggle, .workflow-agent-toggle, .workflow-report-toggle, .workflow-pin .run-progress-btn { min-height: 36px; }
 }
 
 .tool-group {
