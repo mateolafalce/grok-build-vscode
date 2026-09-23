@@ -11963,6 +11963,14 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         const renewing = !!this.providerNeedsLogin?.[provider];
         await this.setProviderConnected(provider, true);
         if (!this.hasProviderConsent(provider)) break;
+        // Consent is the press. The CREDENTIAL is not proven by it, and the two
+        // must not be collapsed: every surface reads `connected && !needsLogin`
+        // as a healthy account, so recording consent alone made Settings clear
+        // the bar that finishes the sign-in and offer Sign out in its place --
+        // and Sign out runs the vendor logout, destroying the credential the
+        // person pressed Connect to create. Each flow below clears this the
+        // moment it has evidence.
+        this.setProviderNeedsLogin(provider, true);
         // Remote users read the URL on their own device. Muse also needs the
         // captured URL on the desk because its CLI does not open a browser.
         if (origin === "remote") {

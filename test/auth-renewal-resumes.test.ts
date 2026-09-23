@@ -121,6 +121,25 @@ describe("signing in from a conversation that is being refused", () => {
     expect(sidebar.startDeviceLogin).not.toHaveBeenCalled();
   });
 
+  // Pressing Connect states CONSENT. It proves nothing about the credential,
+  // and every surface reads `connected && !needsLogin` as a healthy account:
+  // Settings clears the bar that finishes the terminal sign-in and turns the
+  // button into Sign out, which runs the vendor logout and destroys the
+  // credential the person came to create. An unsteered review found this on
+  // the desk path, where it is the FIRST thing every user does after upgrading
+  // (saved connections are cleared once, so everyone presses Connect again).
+  it.each(["grok", "codex", "claude"])(
+    "leaves %s awaiting its sign-in rather than reporting a healthy account",
+    async provider => {
+      const { sidebar } = loginSidebar({});
+
+      await sidebar.onMessage({ type: "runGrokLogin", provider }, "local");
+
+      expect(sidebar.providerConnectionState[provider]).toBe(true);
+      expect(sidebar.providerNeedsLogin[provider]).toBe(true);
+    },
+  );
+
   it("routes remote Muse sign-in to the shared device flow", async () => {
     const { sidebar, session } = loginSidebar({});
     sidebar.locateProvider.mockReturnValue("/usr/bin/muse");
