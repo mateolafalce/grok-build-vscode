@@ -1,5 +1,23 @@
 # Changelog
 
+## 4.11.1 — 2026-09-23
+
+**An agent you have not connected is never run.** Connecting an agent is now something you say, not something the extension works out by starting your CLI and seeing what happens.
+
+### Fixed
+
+- **An agent you never connected is never started (#171).** Being "connected" used to be inferred: a credential check that succeeded marked the agent connected and saved that permanently, and everything afterwards followed from that flag — reading conversation history when a window opened, re-reading the model list when a CLI's version changed, housekeeping and cleanup. For Claude Code and Codex, "checking" means opening a full session, which is why opening a settings page produced requests to a vendor nobody had signed up for. 4.10.0 closed the first of those doors and we believed it was the last one; it was not.
+
+  Connecting is now a fact you state by pressing **Connect**, read from storage and never guessed. Nothing runs an agent's binary without it: not history, not model catalogs, not version reads, not credential checks, not cleanup, not login retries. Detecting that a CLI is *installed* is still a look at the disk and still works, because otherwise there would be nothing to offer Connect for.
+
+  **Existing connections start clean.** The saved flags cannot tell a deliberate Connect from one the extension assigned itself, so they are all cleared once. Any agent you actually use is one press to reconnect, and **your sign-ins are untouched** — nothing logs you out of anything.
+
+- **"Open Muse sign-in" opens the browser.** Grok, Codex and Claude Code open one themselves; Muse's CLI prints a sign-in address and waits, so at the desk the button opened a terminal and left the address sitting in it. Muse now uses the same headless flow the phone does, and the computer opens that address for you. The link and short code stay on screen either way, and signing in from a phone is unchanged.
+
+### Changed
+
+- **Grok 4.7.** The README, the Marketplace listing and the project description name the current model (#183).
+
 ## 4.11.0 — 2026-09-23
 
 **A fourth agent to talk to, and a workflow that knows when it is finished.** Muse Code joins Grok, Codex and Claude Code. A running workflow stays within reach; a finished one leaves a report where it happened, including when nobody was watching it finish.
