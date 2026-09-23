@@ -1,6 +1,6 @@
 # Changelog
 
-## 4.11.0 — 2026-09-21
+## 4.11.0 — 2026-09-23
 
 **A fourth agent to talk to, and a workflow that knows when it is finished.** Muse Code joins Grok, Codex and Claude Code. A running workflow stays within reach; a finished one leaves a report where it happened, including when nobody was watching it finish.
 
