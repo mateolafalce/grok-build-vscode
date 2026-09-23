@@ -132,11 +132,23 @@ describe("signing in from a conversation that is being refused", () => {
     "leaves %s awaiting its sign-in rather than reporting a healthy account",
     async provider => {
       const { sidebar } = loginSidebar({});
+      const frames: Array<{ connected: boolean; needsLogin: boolean }> = [];
+      sidebar.postProviderState = () => {
+        frames.push({
+          connected: sidebar.providerConnectionState[provider] === true,
+          needsLogin: sidebar.providerNeedsLogin[provider] === true,
+        });
+      };
 
       await sidebar.onMessage({ type: "runGrokLogin", provider }, "local");
 
       expect(sidebar.providerConnectionState[provider]).toBe(true);
       expect(sidebar.providerNeedsLogin[provider]).toBe(true);
+      // And the ORDER, which is where the first attempt at this failed: Settings
+      // drops the Re-check bar on the first frame that reports a healthy account
+      // and never restores it, so no such frame may ever be sent.
+      expect(frames.filter(f => f.connected && !f.needsLogin)).toEqual([]);
+      expect(frames.some(f => f.connected && f.needsLogin)).toBe(true);
     },
   );
 

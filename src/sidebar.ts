@@ -11961,8 +11961,6 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           break;
         }
         const renewing = !!this.providerNeedsLogin?.[provider];
-        await this.setProviderConnected(provider, true);
-        if (!this.hasProviderConsent(provider)) break;
         // Consent is the press. The CREDENTIAL is not proven by it, and the two
         // must not be collapsed: every surface reads `connected && !needsLogin`
         // as a healthy account, so recording consent alone made Settings clear
@@ -11970,7 +11968,15 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         // and Sign out runs the vendor logout, destroying the credential the
         // person pressed Connect to create. Each flow below clears this the
         // moment it has evidence.
+        //
+        // ORDER IS THE WHOLE FIX. Marking it afterwards was no fix at all:
+        // `setProviderConnected` posts a frame of its own, Settings reads that
+        // first frame as a finished account and drops the Re-check bar, and the
+        // later frame never puts it back. The flag has to be true BEFORE the
+        // first frame that says connected.
         this.setProviderNeedsLogin(provider, true);
+        await this.setProviderConnected(provider, true);
+        if (!this.hasProviderConsent(provider)) break;
         // Remote users read the URL on their own device. Muse also needs the
         // captured URL on the desk because its CLI does not open a browser.
         if (origin === "remote") {
