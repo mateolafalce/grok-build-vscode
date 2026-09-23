@@ -12,7 +12,7 @@
 
 ### Changed
 
-- **A workflow stays in reach while it runs, and gets out of the way when it finishes (#163).** The live card pins above the composer, collapsed by default: its name, reported phase dots, current phase, elapsed time and when an update last arrived. Pause, Resume and Stop stay reachable. Open it for the phase strip and one row per agent; failed, cancelled and waiting agents are named even while it is closed. An arriving update is not proof that an agent is making progress, so the card keeps those two facts separate.
+- **A workflow stays in reach while it runs, and gets out of the way when it finishes (#163).** The live card pins above the composer, collapsed by default: its name, reported phase dots, current phase, elapsed time and when an update last arrived. Pause, Resume and Stop stay reachable. Open it for the phase strip and one row per agent; while it is closed, agents that have failed or are waiting on a permission prompt are COUNTED by state — “1 agent failed” — which is the smallest thing that distinguishes a stuck run from a quiet one without putting the roster back on the card. An arriving update is not proof that an agent is making progress, so the card keeps those two facts separate.
 
   When the run ends, the pin goes and its transcript marker becomes a **collapsed report**. The header shows the outcome, reported duration and phase dots without asking you to open it. Open it for the result and agent detail. A finish missed while nobody was watching is recovered from the saved workflow state; reopening an older conversation puts the report where the run happened, without reviving the pin or appending a second copy at the bottom.
 
@@ -24,7 +24,7 @@
 
 - **A Windows install path with spaces can start an agent again.** A command shim installed under a name such as `C:\Users\Jane Smith\…` was split at the space before the CLI could start. Signing in now preserves that path across all four providers, and Muse’s Windows launcher can start the agent from it too.
 
-- **Clear all history says what it can clear.** The confirmation names the supported providers, keeps open conversations, and reports Muse history as kept. Muse rows no longer offer a Delete that cannot work.
+- **Clear all history says what it can clear.** The confirmation names the providers it can actually clear and says open conversations are kept; Muse is reported separately afterwards, as history that was not cleared. Muse rows no longer offer a Delete that cannot work.
 
 ## 4.10.0 — 2026-09-21
 
