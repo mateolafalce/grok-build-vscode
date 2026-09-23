@@ -98,7 +98,13 @@ function loginSidebar(needsLogin: Record<string, boolean>) {
   sidebar.locateProvider = vi.fn(() => "/usr/bin/claude");
   sidebar.workspaceRoot = vi.fn(() => "/repo");
   sidebar.host = { appendLine: vi.fn(), createTerminal: vi.fn(() => ({ show: vi.fn() })) };
-  sidebar.watchProviderLogin = vi.fn();
+  // Connect is where consent is stated, so the real setProviderConnected runs
+  // here and needs somewhere to persist to (#171).
+  sidebar.providerConnectionState = {};
+  sidebar.state = { get: (_key: string, fallback: unknown) => fallback, update: vi.fn(async () => {}) };
+  sidebar.postProviderState = vi.fn();
+  sidebar.invalidateSubscriptionUsage = vi.fn();
+  sidebar.adapterHistory = vi.fn(() => undefined);
   sidebar.newFocusedSession = vi.fn(async () => {});
   sidebar.post = vi.fn();
   sidebar.startDeviceLogin = vi.fn(async () => {});
@@ -106,6 +112,15 @@ function loginSidebar(needsLogin: Record<string, boolean>) {
 }
 
 describe("signing in from a conversation that is being refused", () => {
+  it.each(["grok", "codex", "claude"])("keeps %s desk sign-in in its CLI terminal", async provider => {
+    const { sidebar } = loginSidebar({});
+    await sidebar.onMessage({ type: "runGrokLogin", provider }, "local");
+    expect(sidebar.host.createTerminal).toHaveBeenCalledWith(expect.objectContaining({
+      shellArgs: provider === "claude" ? ["auth", "login"] : ["login"],
+    }));
+    expect(sidebar.startDeviceLogin).not.toHaveBeenCalled();
+  });
+
   it("routes remote Muse sign-in to the shared device flow", async () => {
     const { sidebar, session } = loginSidebar({});
     sidebar.locateProvider.mockReturnValue("/usr/bin/muse");
@@ -114,13 +129,14 @@ describe("signing in from a conversation that is being refused", () => {
     expect(sidebar.host.createTerminal).not.toHaveBeenCalled();
   });
 
-  it("opens the workspace-free Muse login subcommand at the desk", async () => {
+  it("routes desk Muse sign-in through the device flow with browser opening", async () => {
     const { sidebar, session } = loginSidebar({});
     sidebar.locateProvider.mockReturnValue("/usr/bin/muse");
     await sidebar.onMessage({ type: "runGrokLogin", provider: "muse" }, "local");
-    expect(sidebar.host.createTerminal).toHaveBeenCalledWith({
-      name: "Muse Code Login", shellPath: "/usr/bin/muse", shellArgs: ["login"],
-    });
+    expect(sidebar.startDeviceLogin).toHaveBeenCalledWith("muse", "/usr/bin/muse", undefined, { remote: false });
+    expect(sidebar.host.createTerminal).not.toHaveBeenCalled();
+    // The press itself is the consent, and it is recorded before the CLI runs.
+    expect(sidebar.providerConnectionState.muse).toBe(true);
   });
   it("keeps that conversation instead of parking it for a panel", async () => {
     const { sidebar, session } = loginSidebar({ claude: true });

@@ -48,7 +48,6 @@ function makeSidebar(cwd = "/repo"): any {
   sidebar.connectedProviders = vi.fn(() => ["codex"]);
   sidebar.locateProvider = vi.fn(() => "codex");
   sidebar.providerNeedsLogin = {};
-  sidebar.loginReprobeTimers = new Map();
   sidebar.remoteClients = new RemoteClientState<Session>(cwd);
   sidebar.pool = new Set<Session>();
   sidebar.focused = new Session();
@@ -73,7 +72,12 @@ function makeSidebar(cwd = "/repo"): any {
   sidebar.sendRemoteClient = vi.fn();
   sidebar.dotForId = vi.fn(() => "none");
   sidebar.sessionCwd = vi.fn((session: Session) => session.cwd || cwd);
-  sidebar.setProviderConnected = vi.fn(async () => {});
+  // Stubbed to skip persistence, but it still has to WRITE: the saved flag is
+  // what permits the binary to run at all now, so a no-op here silently gates
+  // every path under test (#171).
+  sidebar.setProviderConnected = vi.fn(async (provider: string, connected: boolean) => {
+    sidebar.providerConnectionState = { ...sidebar.providerConnectionState, [provider]: connected };
+  });
   sidebar.rememberProjectProvider = vi.fn(async () => {});
   sidebar.startSession = vi.fn(async () => {});
   // A successful re-check now announces itself, so the re-check path reaches
@@ -148,22 +152,32 @@ describe("an agent that will not authenticate", () => {
     expect(codexState(sidebar).needsLogin).toBeUndefined();
   });
 
-  it("the sign-in action keeps probing until the completed login is observable", async () => {
+  it("the sign-in action records consent and then probes NOBODY", async () => {
+    // Inverted with #171. This used to assert a 0/2/5/10/20/30/60s ladder of
+    // credential probes after the terminal opened, on the reasoning that a
+    // terminal cannot report its own completion. It cannot -- but the ladder
+    // was the extension starting a vendor's binary over and over on a guess,
+    // which is the whole shape the reporter saw as unexplained traffic. The
+    // honest answer is that pressing Connect states the consent, and the
+    // person tells us the sign-in finished by pressing Re-check.
     vi.useFakeTimers();
     try {
       const sidebar = makeSidebar();
-      sidebar.reprobeProviderCredentials = vi.fn()
-        .mockResolvedValueOnce(false)
-        .mockResolvedValueOnce(true);
+      sidebar.reprobeProviderCredentials = vi.fn(async () => true);
 
       await sidebar.onMessage({ type: "runGrokLogin", provider: "grok" }, "local");
       await Promise.resolve();
-      expect(sidebar.reprobeProviderCredentials).toHaveBeenCalledTimes(1);
-      expect(sidebar.reprobeProviderCredentials).toHaveBeenLastCalledWith("grok");
+      // Connect IS the consent, so the flag is saved before anything is run.
+      expect(sidebar.providerConnectionState.grok).toBe(true);
+      expect(sidebar.host.createTerminal).toHaveBeenCalled();
+      expect(sidebar.reprobeProviderCredentials).not.toHaveBeenCalled();
 
-      await vi.advanceTimersByTimeAsync(2_000);
-      expect(sidebar.reprobeProviderCredentials).toHaveBeenCalledTimes(2);
-      expect(sidebar.loginReprobeTimers.has("grok")).toBe(false);
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(sidebar.reprobeProviderCredentials).not.toHaveBeenCalled();
+
+      // And the Re-check the panel offers is what does the observing.
+      await sidebar.onMessage({ type: "recheckConnection", provider: "grok" }, "local");
+      expect(sidebar.reprobeProviderCredentials).toHaveBeenCalledWith("grok");
     } finally {
       vi.useRealTimers();
     }
