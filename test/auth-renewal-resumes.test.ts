@@ -108,6 +108,12 @@ function loginSidebar(needsLogin: Record<string, boolean>) {
   sidebar.newFocusedSession = vi.fn(async () => {});
   sidebar.post = vi.fn();
   sidebar.startDeviceLogin = vi.fn(async () => {});
+  // Connect starts the terminal watcher, whose probe is a real model warm-up
+  // that spawns the vendor's ACP adapter. A harness must never do that: on
+  // macOS CI the spawn failed with ENOENT and escaped as an uncaught
+  // exception while every test in the run passed. Tests about the ladder
+  // itself replace this.
+  sidebar.reprobeProviderCredentials = vi.fn(async () => false);
   return { sidebar, session };
 }
 
