@@ -538,6 +538,7 @@
     "smoke:acp": "npm run compile && node scripts/acp-smoke.mjs",
     "telemetry:probe": "tsc -p . && node scripts/telemetry-probe.cjs",
     "check:relay": "node scripts/check-production-relay.mjs",
+    "check:commits": "node scripts/check-conventional-commits.mjs",
     "check:vsix": "npm run compile && node scripts/check-vsix-requires.mjs",
     "prepackage": "node -e \"const fs=require('fs'); for (const f of fs.readdirSync('.')) if (f.endsWith('.vsix')) fs.unlinkSync(f); fs.rmSync('out',{recursive:true,force:true})\" && npm run check:relay && npm run check:vsix",
     "package": "vsce package --readme-path README.marketplace.md",

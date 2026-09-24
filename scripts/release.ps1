@@ -80,7 +80,7 @@ function Run($label, [scriptblock]$cmd) {
 $pkg     = Get-Content package.json -Raw -Encoding UTF8 | ConvertFrom-Json
 $version = $pkg.version
 $tag     = "v$version"
-if (-not $Message) { $Message = "Release $tag" }
+if (-not $Message) { $Message = "chore: release $tag" }
 Write-Host "Releasing $tag" -ForegroundColor Green
 
 # 1. branch

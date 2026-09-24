@@ -58,7 +58,7 @@ installer_handoff() {
 version="$(node -p "require('./package.json').version")"
 tag="v$version"
 vsix="grok-vscode-phuryn-$version.vsix"
-[ -n "$MSG" ] || MSG="Release $tag"
+[ -n "$MSG" ] || MSG="chore: release $tag"
 printf '\033[32mReleasing %s\033[0m\n' "$tag"
 
 branch="$(git rev-parse --abbrev-ref HEAD)"
