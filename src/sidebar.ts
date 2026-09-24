@@ -2415,6 +2415,50 @@ export class GrokSidebar {
     this.githubDeviceLogin = undefined;
   }
 
+  private loginReprobeTimers = new Map<AcpProvider, ReturnType<typeof setTimeout>>();
+
+  /** Observe an interactive terminal login without requiring a reload. Terminal
+   * APIs do not expose CLI completion portably, so retry on a short bounded
+   * cadence and stop at the first authenticated probe.
+   *
+   * REMOVED IN 4.11.1 AND RESTORED THE SAME DAY. #171 says we never run an
+   * agent the person has not connected, and this ladder was read as exactly
+   * the speculative polling that rule forbids. It is not. It starts only from
+   * the Connect press, one line after consent is recorded, and every probe it
+   * makes goes through `reprobeProviderCredentials`, which returns false
+   * without consent and runs under `providerRunSignal` — so disconnecting
+   * mid-ladder aborts it. It observes work the person just asked for, which is
+   * the one honest job a probe has.
+   *
+   * What its absence cost, measured on the owner's desk: a finished terminal
+   * sign-in was noticed by nothing, so Grok, Codex and Claude each sat showing
+   * their Connect button until Re-check was pressed by hand. Cloud and Muse
+   * were unaffected and that is the tell — both verify through
+   * `confirmDeviceLogin`, and the desk terminal is the only path with no
+   * completion signal of its own. */
+  private watchProviderLogin(provider: AcpProvider): void {
+    // `??=` for the same reason as `providerRuns`: prototype-built test hosts
+    // skip field initializers.
+    const timers = this.loginReprobeTimers ??= new Map();
+    const previous = timers.get(provider);
+    if (previous) clearTimeout(previous);
+    const delays = [0, 2_000, 5_000, 10_000, 20_000, 30_000, 60_000];
+    const attempt = async (index: number): Promise<void> => {
+      timers.delete(provider);
+      if (!this.hasProviderConsent(provider)) return;
+      // A probe that throws is "not signed in yet", never an unhandled
+      // rejection: this runs detached, so nothing else would catch it.
+      let signedIn = false;
+      try { signedIn = await this.reprobeProviderCredentials(provider); } catch { /* next rung */ }
+      if (signedIn) return;
+      const delay = delays[index + 1];
+      if (delay === undefined) return;
+      const timer = setTimeout(() => void attempt(index + 1), delay);
+      timers.set(provider, timer);
+    };
+    void attempt(0);
+  }
+
   private async installManagedCodexCli(): Promise<void> {
     if (this.codexInstallAbort) return;
     const alreadyLocated = this.locateProvider("codex");
@@ -8816,7 +8860,9 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     if (this.reaper) { clearInterval(this.reaper); this.reaper = undefined; }
     if (this.routineTimer) { clearInterval(this.routineTimer); this.routineTimer = undefined; }
     if (this.workflowTimer) { clearInterval(this.workflowTimer); this.workflowTimer = undefined; }
+    for (const timer of this.loginReprobeTimers?.values() ?? []) clearTimeout(timer);
     this.cancelAllDeviceLogins();
+    this.loginReprobeTimers?.clear();
     for (const controller of this.providerRuns.values()) controller.abort();
     for (const timer of this.turnOrderTimers) clearTimeout(timer);
     this.turnOrderTimers.clear();
@@ -11999,7 +12045,13 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           shellArgs: loginArgs,
         });
         term.show();
-        // Terminal completion is acknowledged by Re-check; no background login probes.
+        // The terminal is outside the host protocol, so completion cannot be
+        // observed directly. Probe on a bounded ladder as well: browser/desktop
+        // login helpers may already have completed, and the explicit Re-check
+        // below remains available for interactive terminals still in progress.
+        // Muse never reaches here -- it takes the device flow above, which
+        // verifies its own credential.
+        this.watchProviderLogin(provider);
         // Connecting an agent is about the NEXT conversation, not the one on
         // screen. Showing its sign-in panel over a session with history covered
         // that transcript, and the confirmation afterwards had nowhere sensible
@@ -12104,6 +12156,11 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           break;
         }
         if (!this.hasProviderConsent(provider)) break;
+        // An explicit Re-check supersedes the ladder still running behind a
+        // terminal login, so the two cannot probe over each other.
+        const pendingLoginProbe = this.loginReprobeTimers?.get(provider);
+        if (pendingLoginProbe) clearTimeout(pendingLoginProbe);
+        this.loginReprobeTimers?.delete(provider);
         const signal = this.providerRunSignal(provider);
         if (provider === "muse") {
           const client = await this.adapterHistoryClient(provider, this.locateProvider(provider)!);

@@ -198,7 +198,7 @@ open a login terminal on the desk. `runGrokLogin` and `setupGithubCli` are
 `full`: a remote sign-in is the headless device-code flow, not a terminal. A remote `retryProviderSession` may only restart
 an already-connected provider; signed-out remote onboarding offers the CLI’s headless login flow for all four
 providers. Grok, Codex and Muse show a link and short code; Claude accepts a pasted
-code. Grok, Codex and Claude open a terminal for desk sign-in and do not probe behind it; Re-check is what observes the credential. Muse at the desk uses the headless device flow (`startDeviceLogin` with `remote: false`) and opens the printed URL in the browser; the link and short code stay on the card, and a phone is left to open that URL on its own device. Re-check requires consent and bypasses the history freshness clock. For Grok, Codex and Claude it calls `reprobeProviderCredentials`. Codex probes use `isCodexCredentialError`, so an uncoded `Sign in required` result
+code. Grok, Codex and Claude open a terminal for desk sign-in, which reports no completion of its own, so `watchProviderLogin` re-probes on a bounded ladder (0/2/5/10/20/30/60s) and stops at the first authenticated probe; it starts only from the Connect press, after consent is saved, and each rung re-checks consent. Re-check observes a terminal the ladder gave up on. Muse at the desk uses the headless device flow (`startDeviceLogin` with `remote: false`) and opens the printed URL in the browser; the link and short code stay on the card, and a phone is left to open that URL on its own device. Re-check requires consent and bypasses the history freshness clock. For Grok, Codex and Claude it calls `reprobeProviderCredentials`. Codex probes use `isCodexCredentialError`, so an uncoded `Sign in required` result
 sets `needsLogin` and a later success clears it; Grok uses `isCredentialError` the same way. Muse has no such probe: Re-check acknowledges the sign-in, and a later turn reports a failure. Codex logout runs as an observed one-shot process and clears connection state only after exit success
 (an unspawnable process is opened in a terminal while state remains connected).
 After a successful sign-out, the provider is disconnected in memory and every
@@ -1056,7 +1056,7 @@ Release-blocking provider invariants: queued sign-out drafts are persisted in
 startup; `needsProvider` and draft-bearing sessions survive every park, release,
 sweep, and reaper path, including detached remote tabs. Sign-out notices are
 transient desk frames, never replayable session history. Codex credential probes
-use `isCodexCredentialError`. Device-login verification retries until a credential is observed or the attempts run out; a desk terminal login does not poll. Re-check
+use `isCodexCredentialError`. Device-login verification retries until a credential is observed or the attempts run out; a desk terminal login is watched by the same bounded ladder. Re-check
 bypasses history freshness. Durable `recheckConnection` is host-local, while a
 remote `retryProviderSession` can restart only an already-connected provider.
 

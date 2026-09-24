@@ -188,3 +188,45 @@ describe("signing in from a conversation that is being refused", () => {
     expect(sidebar.newFocusedSession).toHaveBeenCalled();
   });
 });
+
+/**
+ * The desk terminal is the ONLY sign-in path with no completion signal of its
+ * own, and 4.11.1 briefly took away the one thing that watched it.
+ *
+ * #171 stopped the extension running an agent nobody had connected, and the
+ * brief that drove it called this ladder "speculative polling". It is not: it
+ * starts one line after consent is recorded, from the Connect press itself.
+ * Removing it meant a finished `grok login` / `codex login` / `claude auth
+ * login` was noticed by nothing, so the account sat unconnected until Re-check
+ * was pressed by hand — on the owner's desk, for all three agents.
+ *
+ * Cloud and Muse never showed it, and that is exactly why no suite caught it:
+ * both go through `startDeviceLogin`, which verifies its own credential. A
+ * test that drives the device flow proves nothing about the terminal one.
+ */
+describe("a desk terminal sign-in finishes without being asked twice", () => {
+  it.each(["grok", "codex", "claude"])("re-probes %s after the terminal opens", async provider => {
+    const { sidebar } = loginSidebar({});
+    sidebar.reprobeProviderCredentials = vi.fn(async () => true);
+
+    await sidebar.onMessage({ type: "runGrokLogin", provider }, "local");
+    await Promise.resolve();
+
+    expect(sidebar.host.createTerminal).toHaveBeenCalled();
+    expect(sidebar.reprobeProviderCredentials).toHaveBeenCalledWith(provider);
+  });
+
+  // The ladder must not outlive the consent that authorised it: disconnecting
+  // between two rungs is a withdrawal, and #171 is the reason the guard is
+  // inside `attempt` rather than only at the call site.
+  it("stops probing an agent that was disconnected mid-ladder", async () => {
+    const { sidebar } = loginSidebar({});
+    sidebar.reprobeProviderCredentials = vi.fn(async () => true);
+
+    sidebar.providerConnectionState = {};
+    sidebar.watchProviderLogin("codex");
+    await Promise.resolve();
+
+    expect(sidebar.reprobeProviderCredentials).not.toHaveBeenCalled();
+  });
+});

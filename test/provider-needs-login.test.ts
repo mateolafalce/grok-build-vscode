@@ -152,32 +152,35 @@ describe("an agent that will not authenticate", () => {
     expect(codexState(sidebar).needsLogin).toBeUndefined();
   });
 
-  it("the sign-in action records consent and then probes NOBODY", async () => {
-    // Inverted with #171. This used to assert a 0/2/5/10/20/30/60s ladder of
-    // credential probes after the terminal opened, on the reasoning that a
-    // terminal cannot report its own completion. It cannot -- but the ladder
-    // was the extension starting a vendor's binary over and over on a guess,
-    // which is the whole shape the reporter saw as unexplained traffic. The
-    // honest answer is that pressing Connect states the consent, and the
-    // person tells us the sign-in finished by pressing Re-check.
+  it("the sign-in action records consent, then watches the terminal it opened", async () => {
+    // #171 inverted this to "probes NOBODY", calling the ladder the extension
+    // starting a vendor's binary on a guess. It is not a guess: it starts from
+    // the Connect press, after consent is saved, and #171's reporter never
+    // pressed Connect, so it could not have been their traffic. What the
+    // inversion did cost was measured on the owner's desk the same day: a
+    // finished `grok login` / `codex login` / `claude auth login` was noticed
+    // by nothing, and every agent waited for a hand-pressed Re-check.
     vi.useFakeTimers();
     try {
       const sidebar = makeSidebar();
-      sidebar.reprobeProviderCredentials = vi.fn(async () => true);
+      // Fail until the fourth probe: the person is still in the browser.
+      let calls = 0;
+      sidebar.reprobeProviderCredentials = vi.fn(async () => ++calls >= 4);
 
       await sidebar.onMessage({ type: "runGrokLogin", provider: "grok" }, "local");
       await Promise.resolve();
       // Connect IS the consent, so the flag is saved before anything is run.
       expect(sidebar.providerConnectionState.grok).toBe(true);
       expect(sidebar.host.createTerminal).toHaveBeenCalled();
-      expect(sidebar.reprobeProviderCredentials).not.toHaveBeenCalled();
+      expect(sidebar.reprobeProviderCredentials).toHaveBeenCalledTimes(1);
 
       await vi.advanceTimersByTimeAsync(120_000);
-      expect(sidebar.reprobeProviderCredentials).not.toHaveBeenCalled();
+      // 0s, 2s, 5s, 10s -- and it stops at the first probe that succeeds.
+      expect(sidebar.reprobeProviderCredentials).toHaveBeenCalledTimes(4);
 
-      // And the Re-check the panel offers is what does the observing.
+      // Re-check still works for a terminal the ladder gave up on.
       await sidebar.onMessage({ type: "recheckConnection", provider: "grok" }, "local");
-      expect(sidebar.reprobeProviderCredentials).toHaveBeenCalledWith("grok");
+      expect(sidebar.reprobeProviderCredentials).toHaveBeenCalledTimes(5);
     } finally {
       vi.useRealTimers();
     }
