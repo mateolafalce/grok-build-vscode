@@ -1,15 +1,13 @@
 /**
- * Where the composer says the session is standing.
+ * Where the composer says the open project is standing.
  *
- * Claude Code draws this as a quiet row above the prompt: the machine, the
- * folder, the branch, and whether the checkout is a worktree. The host owns
- * the git read. The webview only paints the frame, so a client cannot point
- * `git` at a path the host did not already trust as this session's cwd.
+ * The row is the project's folder and its branch. The host owns the git read.
+ * The webview only paints the frame, so a client cannot point `git` at a path
+ * the host did not already trust as the open project.
  *
- * One `git rev-parse` is enough:
+ * One `git rev-parse` answers the branch:
  * `--is-inside-work-tree`, `--abbrev-ref HEAD`, `--git-dir`, `--git-common-dir`.
- * A linked worktree is the case where the git dir and the common dir differ.
- * The main checkout prints the same path for both.
+ * Local branch names come from a separate `for-each-ref` and are parsed here.
  */
 
 export type ComposerWhereKind = "ok" | "no-git" | "not-a-repo";
@@ -64,6 +62,26 @@ export function gitDirsDiffer(
   const b = normalizeGitPath(commonDir, cwd, platform);
   if (!a || !b) return false;
   return a !== b;
+}
+
+/**
+ * Local branch names from `git for-each-ref --format=%(refname:short) refs/heads`.
+ * Drops blanks and anything that could be read as a flag. Order is alphabetical.
+ */
+export function parseLocalBranchList(stdout: string): string[] {
+  const seen = new Set<string>();
+  const names: string[] = [];
+  for (const raw of String(stdout || "").split(/\r?\n/)) {
+    const name = raw.trim();
+    if (!name || seen.has(name) || name === "HEAD") continue;
+    if (name.startsWith("-") || name.startsWith(".") || name.endsWith(".") || name.endsWith("/")) continue;
+    if (name.includes("..") || name.includes("//") || /[\s\u0000]/.test(name)) continue;
+    if (!/^[A-Za-z0-9._/-]+$/.test(name)) continue;
+    seen.add(name);
+    names.push(name);
+  }
+  names.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  return names;
 }
 
 export function composerWhereFromGit(opts: {

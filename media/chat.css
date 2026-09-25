@@ -3703,8 +3703,7 @@ body.hide-turn-diff-summary .turn-diff-summary { display: none; }
   border-color: var(--vscode-focusBorder);
 }
 
-/* Where this session is standing. Same facts Claude Code puts above the
-   prompt: machine, folder, branch, worktree. Quiet chips, not a second toolbar. */
+/* Open project and its branch, above the prompt. Quiet chips, not a second toolbar. */
 .composer-where {
   display: flex;
   flex-wrap: wrap;
@@ -3712,6 +3711,7 @@ body.hide-turn-diff-summary .turn-diff-summary { display: none; }
   gap: 6px;
   padding: 8px 8px 2px;
   min-width: 0;
+  position: relative;
 }
 .composer-where[hidden] { display: none; }
 .where-chip {
@@ -3749,26 +3749,53 @@ body.hide-turn-diff-summary .turn-diff-summary { display: none; }
 }
 .where-folder { max-width: 34cqw; }
 .where-branch { max-width: 46cqw; }
-.where-box {
-  width: 12px;
-  height: 12px;
-  border-radius: 3px;
-  border: 1px solid currentColor;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  opacity: 0.75;
+.where-branch:disabled { opacity: 0.6; }
+.where-chevron { display: inline-flex; flex: none; opacity: 0.7; }
+.where-chevron svg { display: block; }
+.where-branch-menu {
+  position: absolute;
+  z-index: 8;
+  top: calc(100% - 2px);
+  min-width: 180px;
+  max-width: min(320px, 100%);
+  max-height: 240px;
+  overflow: auto;
+  margin: 0;
+  padding: 4px;
+  border-radius: 8px;
+  border: 1px solid var(--vscode-editorWidget-border, var(--vscode-input-border));
+  background: var(--vscode-editorWidget-background, var(--vscode-input-background));
+  box-shadow: 0 8px 24px color-mix(in srgb, #000 28%, transparent);
 }
-.where-worktree[aria-checked="true"] .where-box {
-  background: var(--vscode-foreground);
-  color: var(--vscode-editor-background, #1e1e1e);
-  border-color: var(--vscode-foreground);
-  opacity: 1;
+.where-branch-item {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.3;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.where-worktree[aria-checked="true"] .where-box svg {
-  width: 10px;
-  height: 10px;
+.where-branch-item:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+.where-branch-item[aria-current="true"] {
+  background: var(--vscode-list-activeSelectionBackground);
+  color: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground));
+}
+.where-branch-empty {
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground, var(--vscode-foreground));
 }
 
 /* Scroll to bottom (#16). Anchored to the composer rather than the message

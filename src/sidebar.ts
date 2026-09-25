@@ -295,7 +295,7 @@ import {
   resolveRemoteFileRoot,
   writeRemoteProjectFile,
 } from "./remote-files";
-import { GitRunGate, captureGitTurnBaseline, readComposerWhere, readGitFileDiff, readGitTurnFileBefore, readGitStatus, runGitPlan, type GitTurnBaseline } from "./git-run";
+import { GitRunGate, captureGitTurnBaseline, checkoutLocalBranch, readComposerWhere, readGitFileDiff, readGitTurnFileBefore, readGitStatus, readLocalBranches, runGitPlan, type GitTurnBaseline } from "./git-run";
 import { describeGitFailure, isKnownChangedPath, planGitOp } from "./git-status";
 import {
   isCloudEnvironment,
@@ -6691,6 +6691,7 @@ Only continue if you trust this code.`,
     }
     this.selectedRepoCwd = target;
     this.postRepoCatalog();
+    this.scheduleComposerWhere();
 
     // Already focused on this folder's live conversation — just refresh chrome.
     if (pathsEqual(this.sessionCwd(this.focused), target) && this.focused.client) {
@@ -12780,6 +12781,31 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
         }
         break;
       }
+      case "switchBranch": {
+        const branch = typeof msg.branch === "string" ? msg.branch : "";
+        const claimed = typeof msg.cwd === "string" ? msg.cwd : "";
+        const rootResult = this.resolveGitRoot(claimed, origin, clientId);
+        const finish = () => this.scheduleComposerWhere(session);
+        if (!rootResult.ok) {
+          void this.host.showWarningMessage(rootResult.reason);
+          finish();
+          break;
+        }
+        const root = rootResult.root;
+        if (!this.gitRunGate.tryAcquire(root)) {
+          void this.host.showWarningMessage("Another git command is still running in this project.");
+          finish();
+          break;
+        }
+        try {
+          const outcome = await checkoutLocalBranch(root, branch);
+          if (!outcome.ok) void this.host.showWarningMessage(outcome.reason);
+        } finally {
+          this.gitRunGate.release(root);
+          finish();
+        }
+        break;
+      }
       case "voiceStart":
         await this.handleVoiceStart(session);
         break;
@@ -14020,40 +14046,60 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
   }
 
   /**
-   * Folder, branch, and worktree for the composer row.
+   * Folder and branch for the composer row.
    *
-   * A newer call bumps the flight so a slow read of the checkout we just left
-   * cannot paint over the one we are in. The client never asks git itself.
+   * The local row follows the open project (`workspaceRoot`), so opening
+   * another folder repaints it. A remote tab still hears about its own
+   * session checkout when that path is different. A newer call bumps the
+   * flight so a slow read of the folder we just left cannot paint over the
+   * one we are in. The client never asks git itself.
    */
   private scheduleComposerWhere(session: Session = this.focused): void {
     const flight = ++this.composerWhereFlight;
-    const cwd = this.sessionCwd(session);
-    if (!cwd) return;
-    void readComposerWhere(cwd).then((where) => {
-      if (flight !== this.composerWhereFlight) return;
-      if (!pathsEqual(this.sessionCwd(session), cwd)) return;
-      const message: HostMsg = {
-        type: "composerWhere",
-        cwd,
-        folder: where.folder || path.basename(cwd),
-        branch: where.branch,
-        detached: where.detached,
-        linkedWorktree: where.linkedWorktree || !!session.worktree,
-        ...(session.worktree?.label ? { worktreeLabel: session.worktree.label } : {}),
-        place: isCloudEnvironment() ? "cloud" : "local",
-        kind: where.kind,
-      };
-      if (session === this.focused) this.postLocal(message);
-      if (session.activeSessionId) this.sendRemoteSession(session, message);
-    });
+    const localCwd = this.workspaceRoot();
+    const remoteCwd = session.activeSessionId ? this.sessionCwd(session) : "";
+    const jobs: { cwd: string; local: boolean; remote: boolean }[] = [];
+    if (localCwd) {
+      jobs.push({
+        cwd: localCwd,
+        local: session === this.focused,
+        remote: !!remoteCwd && pathsEqual(remoteCwd, localCwd),
+      });
+    }
+    if (remoteCwd && !jobs.some((job) => pathsEqual(job.cwd, remoteCwd))) {
+      jobs.push({ cwd: remoteCwd, local: false, remote: true });
+    }
+    for (const job of jobs) {
+      const cwd = job.cwd;
+      void Promise.all([readComposerWhere(cwd), readLocalBranches(cwd)]).then(([where, branches]) => {
+        if (flight !== this.composerWhereFlight) return;
+        if (job.local && !pathsEqual(this.workspaceRoot(), cwd)) return;
+        if (job.remote && !pathsEqual(this.sessionCwd(session), cwd)) return;
+        const message: HostMsg = {
+          type: "composerWhere",
+          cwd,
+          folder: where.folder || path.basename(cwd),
+          branch: where.branch,
+          detached: where.detached,
+          branches,
+          linkedWorktree: where.linkedWorktree || !!session.worktree,
+          ...(session.worktree?.label ? { worktreeLabel: session.worktree.label } : {}),
+          place: isCloudEnvironment() ? "cloud" : "local",
+          kind: where.kind,
+        };
+        if (job.local) this.postLocal(message);
+        if (job.remote && session.activeSessionId) this.sendRemoteSession(session, message);
+      });
+    }
   }
 
   /** Push the focused conversation's title independently of history pagination.
    *  The VS Code webview must not depend on the history popover having been
    *  opened, while remote tabs need the same live update after a rename or turn. */
   private postSessionName(session: Session, name = this.sessionDisplayName(session)): void {
-    // The name and the checkout move together. Refresh the location row even
-    // when there is no id yet, so the welcome screen can already say the branch.
+    // The row names the open project, which can move without this conversation.
+    // Refresh it even when there is no id yet, so the welcome screen can already
+    // say the branch.
     this.scheduleComposerWhere(session);
     const id = session.activeSessionId;
     if (!id) return;

@@ -3,8 +3,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { composerWhereFromGit, folderLeaf, gitDirsDiffer } from "../src/composer-where";
-import { readComposerWhere, type GitIo } from "../src/git-run";
+import { composerWhereFromGit, folderLeaf, gitDirsDiffer, parseLocalBranchList } from "../src/composer-where";
+import { checkoutLocalBranch, readComposerWhere, readLocalBranches, type GitIo } from "../src/git-run";
 
 describe("composerWhereFromGit", () => {
   it("reads a main checkout", () => {
@@ -77,6 +77,46 @@ describe("composerWhereFromGit", () => {
   });
 });
 
+describe("parseLocalBranchList", () => {
+  it("keeps local names and drops anything that could be a flag", () => {
+    expect(parseLocalBranchList("main\nfeat/composer-where\n\n-orphan\n..\nHEAD\n")).toEqual([
+      "feat/composer-where",
+      "main",
+    ]);
+  });
+});
+
+describe("checkoutLocalBranch", () => {
+  function ioFor(list: string): GitIo {
+    return {
+      execFile: ((_cmd: string, args: string[], _opts: unknown, cb: (err: Error | null, stdout: string, stderr: string) => void) => {
+        const gitArgs = args.slice(2);
+        if (gitArgs[0] === "for-each-ref") cb(null, list, "");
+        else if (gitArgs[0] === "checkout") cb(null, "", "");
+        else cb(new Error("unexpected"), "", "unexpected");
+        return { stdin: undefined } as never;
+      }) as GitIo["execFile"],
+    };
+  }
+
+  it("checks out a listed branch and refuses a name that is not in the list", async () => {
+    const io = ioFor("main\nfeat/composer-where\n");
+    const calls: string[][] = [];
+    const wrapped: GitIo = {
+      execFile: ((cmd, args, opts, cb) => {
+        calls.push(args.slice(2));
+        return io.execFile(cmd, args, opts, cb);
+      }) as GitIo["execFile"],
+    };
+    expect(await checkoutLocalBranch("/work/app", "feat/composer-where", { io: wrapped })).toEqual({ ok: true });
+    expect(calls).toContainEqual(["checkout", "feat/composer-where"]);
+    const refused = await checkoutLocalBranch("/work/app", "--orphan", { io: wrapped });
+    expect(refused.ok).toBe(false);
+    expect(calls.some((args) => args[0] === "checkout" && args[1] === "--orphan")).toBe(false);
+    expect((await checkoutLocalBranch("/work/app", "nope", { io: wrapped })).ok).toBe(false);
+  });
+});
+
 describe("readComposerWhere", () => {
   const dirs: string[] = [];
   afterEach(() => {
@@ -139,5 +179,11 @@ describe("readComposerWhere", () => {
     });
     const empty = fs.mkdtempSync(path.join(root, "empty-"));
     expect((await readComposerWhere(empty)).kind).toBe("not-a-repo");
+    await git(repo, ["checkout", "-b", "feat/other"]);
+    await git(repo, ["checkout", branch]);
+    expect(await readLocalBranches(repo)).toEqual(expect.arrayContaining([branch, "feat/other"]));
+    expect(await checkoutLocalBranch(repo, "feat/other")).toEqual({ ok: true });
+    expect((await git(repo, ["branch", "--show-current"])).trim()).toBe("feat/other");
+    expect((await checkoutLocalBranch(repo, "not-a-branch")).ok).toBe(false);
   });
 });

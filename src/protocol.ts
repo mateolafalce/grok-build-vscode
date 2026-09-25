@@ -614,9 +614,10 @@ export type HostMsg =
   // `worktree` gates the gear's Apply/Remove worktree items to worktree sessions.
   | { type: "session"; sessionId: string; models: ModelInfo[]; currentModelId: string | undefined; worktree?: boolean; provider?: AcpProvider }
   /**
-   * Where the focused checkout is standing: folder leaf, branch, and whether
-   * it is a linked worktree. The host reads git. The client paints it.
-   * Additive: a client that never sees the frame keeps a composer with no row.
+   * Where the open project is standing: folder leaf, current branch, and the
+   * local branches the branch menu can check out. The host reads git. The
+   * client paints it. Additive: a client that never sees the frame keeps a
+   * composer with no row.
    */
   | {
       type: "composerWhere";
@@ -624,6 +625,8 @@ export type HostMsg =
       folder: string;
       branch: string | null;
       detached: boolean;
+      /** Local branch names. Absent on an older host: the menu stays closed. */
+      branches?: string[];
       linkedWorktree: boolean;
       /** Set when this session was started as one of our worktrees. */
       worktreeLabel?: string;
@@ -1457,6 +1460,12 @@ export type WebviewMsg =
       branch?: string;
       path?: string;
     }
+  /**
+   * Composer branch menu: check out one local branch of the open project.
+   * The host lists the branches itself and refuses any name that is not in
+   * that list. `cwd` is the folder the row is showing.
+   */
+  | { type: "switchBranch"; cwd: string; branch: string }
   | { type: "pasteImage"; mimeType: string; data: string; previewId?: string }
   // Remote browser upload: an untrusted basename plus base64 bytes. The host
   // allowlists/sanitizes/stages it, then routes it through addDroppedFile.
@@ -1584,7 +1593,7 @@ const WEBVIEW_MESSAGE_TYPE_MAP: Record<WebviewMsg["type"], true> = {
   clearAllSessions: true, pickFile: true, mentionQuery: true, addMentionFile: true,
   listProjectDir: true, readProjectFile: true, writeProjectFile: true,
   readProviderConfig: true, writeProviderConfig: true, restartProviderSession: true,
-  gitStatus: true, gitFileDiff: true, turnFileDiff: true, turnFileOpenDiff: true, gitRun: true,
+  gitStatus: true, gitFileDiff: true, turnFileDiff: true, turnFileOpenDiff: true, gitRun: true, switchBranch: true,
   pasteImage: true, uploadFile: true, voiceStart: true,
   voiceStop: true, setVoiceBackend: true, configureOpenAiVoice: true, remoteVoiceStart: true, remoteVoiceChunk: true,
   remoteVoiceStop: true, queueSend: true, dequeueSend: true, clearQueuedSends: true,

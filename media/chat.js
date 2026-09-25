@@ -582,6 +582,10 @@
     cwd: "",
     /** Last `composerWhere` frame. Null until the host has read git. */
     composerWhere: null,
+    /** Branch menu above the composer is open. */
+    whereBranchOpen: false,
+    /** A checkout is in flight. The menu stays shut until the host answers. */
+    branchSwitching: false,
     contextWindow: 200000,
     usedTokens: 0,
     useCtrlEnter: false,
@@ -2161,6 +2165,7 @@
     gearPopover.removeAttribute("role");
     gearPopover.removeAttribute("aria-label");
     modePopover.hidden = true;
+    closeBranchMenu();
     gearPopover.hidden = true;
     addPopover.hidden = true;
     historyPopover.hidden = true;
@@ -5194,9 +5199,33 @@
     return parts[parts.length - 1] || "Repository";
   };
 
-  function whereCwd() {
-    const named = activeSessionName();
-    return (named && named.cwd) || state.cwd || "";
+  /** The project the row is naming: the folder the editor has open. */
+  function openProjectCwd() {
+    return state.workspaceRepoCwd || state.cwd || "";
+  }
+
+  function orderBranches(branches, current) {
+    const names = [];
+    const seen = new Set();
+    const push = (name) => {
+      if (!name || seen.has(name)) return;
+      seen.add(name);
+      names.push(name);
+    };
+    const rest = (Array.isArray(branches) ? branches : [])
+      .filter((name) => name && name !== current)
+      .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    push(current);
+    for (const name of rest) push(name);
+    return names;
+  }
+
+  function closeBranchMenu() {
+    state.whereBranchOpen = false;
+    const menu = document.querySelector("#composer-where .where-branch-menu");
+    if (menu) menu.remove();
+    const btn = document.querySelector("#composer-where .where-branch");
+    if (btn) btn.setAttribute("aria-expanded", "false");
   }
 
   /**
@@ -5228,13 +5257,12 @@
     return el;
   }
 
-  /** Claude-style row: Local/Cloud, folder, branch, worktree. */
+  /** Folder of the open project, and a branch menu for that same folder. */
   function renderComposerWhere() {
     const root = $("composer-where");
     if (!root) return;
-    const live = whereCwd();
-    // A frame for the checkout we just left must not relabel the one we are in.
-    // It stays stored so a sessionName that catches up can still use it.
+    const live = openProjectCwd();
+    // A frame for the project we just left must not relabel the one we opened.
     const stored = state.composerWhere;
     const reported = stored && (!live || !stored.cwd || sameCwd(stored.cwd, live)) ? stored : null;
     const cwd = (reported && reported.cwd) || live;
@@ -5242,27 +5270,16 @@
     if (!leaf) {
       root.hidden = true;
       root.replaceChildren();
+      state.whereBranchOpen = false;
       return;
     }
-    const place = reported && reported.place === "cloud" ? "cloud" : "local";
-    const linked = !!(reported && reported.linkedWorktree) || !!state.isWorktree;
     const kind = reported ? reported.kind : "";
-    const showBranch = kind === "ok" && !!(reported.detached || reported.branch);
-    const canStart = isCodingPurpose() && state.worktreeSupported && !linked && !IS_REMOTE && kind === "ok";
-    // Checked when this checkout already is a worktree. The empty box is the
-    // Coding action that starts one, so Knowledge work does not grow a control
-    // that does nothing.
-    const showWorktree = linked || canStart;
-    const labelText = reported && reported.worktreeLabel ? reported.worktreeLabel : "";
+    const branches = reported && Array.isArray(reported.branches) ? reported.branches : [];
+    const showBranch = kind === "ok" && !!(reported.detached || reported.branch || branches.length);
+    const menuOpen = !!(state.whereBranchOpen && showBranch && !state.branchSwitching);
 
     root.hidden = false;
     root.replaceChildren();
-    root.appendChild(whereChip({
-      className: "where-place",
-      icon: place === "cloud" ? ICON.cloud : ICON.monitor,
-      label: place === "cloud" ? "Cloud" : "Local",
-      title: place === "cloud" ? "This session runs in the cloud" : "This session runs on this machine",
-    }));
 
     const folderEl = whereChip({
       className: "where-folder",
@@ -5289,34 +5306,71 @@
     root.appendChild(folderEl);
 
     if (showBranch) {
-      const branchLabel = reported.detached ? "Detached" : reported.branch;
-      root.appendChild(whereChip({
+      const branchLabel = reported.detached ? "Detached" : (reported.branch || "");
+      const branchEl = whereChip({
         className: "where-branch",
         icon: ICON.gitBranch,
         label: branchLabel,
-        title: reported.detached ? "Detached HEAD" : reported.branch,
-      }));
-    }
-
-    if (showWorktree) {
-      const chip = whereChip({
-        className: "where-worktree",
-        box: true,
-        checked: linked,
-        label: "worktree",
-        title: linked
-          ? (labelText ? "Worktree: " + labelText : "This folder is a git worktree")
-          : (canStart ? "Start the next session in a new worktree" : "Not a worktree"),
-        actionable: canStart,
+        title: reported.detached ? "Detached HEAD. Choose a branch." : "Switch branch",
+        actionable: true,
       });
-      chip.setAttribute("role", "checkbox");
-      chip.setAttribute("aria-checked", linked ? "true" : "false");
-      chip.onclick = (e) => {
+      const chev = document.createElement("span");
+      chev.className = "where-chevron";
+      chev.setAttribute("aria-hidden", "true");
+      chev.innerHTML = ICON.chevronDown;
+      branchEl.appendChild(chev);
+      branchEl.setAttribute("aria-haspopup", "listbox");
+      branchEl.setAttribute("aria-expanded", menuOpen ? "true" : "false");
+      branchEl.disabled = !!state.branchSwitching;
+      branchEl.onclick = (e) => {
         e.stopPropagation();
-        if (!canStart) return;
-        vscode.postMessage({ type: "newWorktreeSession" });
+        if (state.branchSwitching) return;
+        if (state.whereBranchOpen) {
+          closeBranchMenu();
+          return;
+        }
+        closePopovers();
+        state.whereBranchOpen = true;
+        renderComposerWhere();
       };
-      root.appendChild(chip);
+      root.appendChild(branchEl);
+
+      if (menuOpen) {
+        const menu = document.createElement("div");
+        menu.className = "where-branch-menu";
+        menu.setAttribute("role", "listbox");
+        menu.onclick = (e) => e.stopPropagation();
+        const ordered = orderBranches(branches, reported.detached ? "" : reported.branch);
+        if (!ordered.length) {
+          const empty = document.createElement("div");
+          empty.className = "where-branch-empty";
+          empty.textContent = "No branches";
+          menu.appendChild(empty);
+        }
+        for (const name of ordered) {
+          const item = document.createElement("button");
+          item.type = "button";
+          item.className = "where-branch-item";
+          item.setAttribute("role", "option");
+          const current = !reported.detached && name === reported.branch;
+          if (current) item.setAttribute("aria-current", "true");
+          item.textContent = name;
+          item.onclick = (e) => {
+            e.stopPropagation();
+            if (current || state.branchSwitching) {
+              closeBranchMenu();
+              return;
+            }
+            state.branchSwitching = true;
+            state.whereBranchOpen = false;
+            vscode.postMessage({ type: "switchBranch", cwd, branch: name });
+            renderComposerWhere();
+          };
+          menu.appendChild(item);
+        }
+        root.appendChild(menu);
+        menu.style.left = branchEl.offsetLeft + "px";
+      }
     }
   }
 
@@ -19266,7 +19320,7 @@
           renderSessionName();
           renderSessionHead();
         }
-        noteComposerWhereCwd(next.cwd || state.cwd);
+        noteComposerWhereCwd(openProjectCwd());
         pendingSessionChromeReset = false;
         if (prev && !sameId) {
           focusComposerIfAllowed();
@@ -20670,6 +20724,7 @@
         // is worth showing at all (one project — nothing to disambiguate) and
         // what it reads. It usually lands after the name.
         renderSessionName();
+        noteComposerWhereCwd(openProjectCwd());
         if (!repoPopover.hidden) renderRepoPopover();
         renderRail();
         requestRailPreviews();
@@ -20690,11 +20745,15 @@
       }
       case "composerWhere": {
         const cwd = String(msg.cwd || "");
+        state.branchSwitching = false;
         state.composerWhere = {
           cwd,
           folder: String(msg.folder || ""),
           branch: typeof msg.branch === "string" && msg.branch ? msg.branch : null,
           detached: !!msg.detached,
+          branches: Array.isArray(msg.branches)
+            ? msg.branches.filter((name) => typeof name === "string" && name)
+            : [],
           linkedWorktree: !!msg.linkedWorktree,
           worktreeLabel: typeof msg.worktreeLabel === "string" ? msg.worktreeLabel : "",
           place: msg.place === "cloud" ? "cloud" : "local",

@@ -20,61 +20,88 @@ function labels(doc: Document): string[] {
   return [...doc.querySelectorAll("#composer-where .where-label")].map((el) => el.textContent || "");
 }
 
+const whereMain = {
+  type: "composerWhere" as const,
+  cwd: "/work/n8n-workflows",
+  folder: "n8n-workflows",
+  branch: "main",
+  detached: false,
+  branches: ["feat/composer-where", "main"],
+  linkedWorktree: false,
+  place: "local" as const,
+  kind: "ok" as const,
+};
+
 describe("composer location row", () => {
-  it("shows the folder from the cwd before git has answered", () => {
+  it("shows the open project's folder before git has answered", () => {
     const h = bootWebview({ ready: true, vscode: true });
     dispatch(h.window, initial);
     expect(h.doc.getElementById("composer-where")!.hidden).toBe(false);
-    expect(labels(h.doc)).toEqual(["Local", "n8n-workflows"]);
+    expect(labels(h.doc)).toEqual(["n8n-workflows"]);
+    expect(h.doc.querySelector(".where-place")).toBeNull();
+    expect(h.doc.querySelector(".where-worktree")).toBeNull();
   });
 
-  it("paints branch and an unchecked worktree, and checking it starts one", () => {
+  it("opens a branch menu and checks out the branch that was picked", () => {
     const h = bootWebview({ ready: true, vscode: true });
     dispatch(h.window, initial);
-    dispatch(h.window, { type: "appPurpose", value: "coding" });
+    dispatch(h.window, whereMain);
+    expect(labels(h.doc)).toEqual(["n8n-workflows", "main"]);
+    click(h.window, h.doc.querySelector(".where-branch")!);
+    const items = [...h.doc.querySelectorAll(".where-branch-item")].map((el) => el.textContent);
+    expect(items).toEqual(["main", "feat/composer-where"]);
+    click(h.window, h.doc.querySelectorAll(".where-branch-item")[1]);
+    expect(h.posted).toContainEqual({
+      type: "switchBranch",
+      cwd: "/work/n8n-workflows",
+      branch: "feat/composer-where",
+    });
+    expect(h.doc.querySelector(".where-branch-menu")).toBeNull();
+  });
+
+  it("does not check out the branch that is already current", () => {
+    const h = bootWebview({ ready: true, vscode: true });
+    dispatch(h.window, initial);
+    dispatch(h.window, whereMain);
+    click(h.window, h.doc.querySelector(".where-branch")!);
+    click(h.window, h.doc.querySelector(".where-branch-item")!);
+    expect(h.posted.some((m) => m.type === "switchBranch")).toBe(false);
+  });
+
+  it("follows the project that was opened, not the conversation", () => {
+    const h = bootWebview({ ready: true, vscode: true });
+    dispatch(h.window, initial);
+    dispatch(h.window, whereMain);
+    dispatch(h.window, { type: "sessionName", sessionId: "s1", name: "Here", cwd: "/work/n8n-workflows" });
+    dispatch(h.window, {
+      type: "repos",
+      entries: [],
+      selectedCwd: "/work/other-app",
+      activeCwd: "/work/n8n-workflows",
+      workspaceCwd: "/work/other-app",
+    });
+    expect(labels(h.doc)).toEqual(["other-app"]);
+    expect(h.doc.querySelector(".where-branch")).toBeNull();
+  });
+
+  it("ignores a where frame for a project we have already left", () => {
+    const h = bootWebview({ ready: true, vscode: true });
+    dispatch(h.window, initial);
     dispatch(h.window, {
       type: "composerWhere",
-      cwd: "/work/n8n-workflows",
-      folder: "n8n-workflows",
-      branch: "chore/sync-workflows-2026-04",
+      cwd: "/work/other",
+      folder: "other",
+      branch: "stale",
       detached: false,
+      branches: ["stale"],
       linkedWorktree: false,
       place: "local",
       kind: "ok",
     });
-    expect(labels(h.doc)).toEqual(["Local", "n8n-workflows", "chore/sync-workflows-2026-04", "worktree"]);
-    const box = h.doc.querySelector(".where-worktree") as HTMLElement;
-    expect(box.getAttribute("aria-checked")).toBe("false");
-    expect(box.title).toContain("new worktree");
-    click(h.window, box);
-    expect(h.posted.some((m) => m.type === "newWorktreeSession")).toBe(true);
+    expect(labels(h.doc)).toEqual(["n8n-workflows"]);
   });
 
-  it("checks the box on a linked worktree and does not remove it on click", () => {
-    const h = bootWebview({ ready: true, vscode: true });
-    dispatch(h.window, initial);
-    dispatch(h.window, { type: "appPurpose", value: "coding" });
-    dispatch(h.window, {
-      type: "composerWhere",
-      cwd: "/work/wt",
-      folder: "wt",
-      branch: "feat/composer-where",
-      detached: false,
-      linkedWorktree: true,
-      worktreeLabel: "composer-where",
-      place: "local",
-      kind: "ok",
-    });
-    dispatch(h.window, { type: "sessionName", sessionId: "s1", name: "Where", cwd: "/work/wt" });
-    const box = h.doc.querySelector(".where-worktree") as HTMLElement;
-    expect(box.getAttribute("aria-checked")).toBe("true");
-    expect(box.title).toBe("Worktree: composer-where");
-    click(h.window, box);
-    expect(h.posted.some((m) => m.type === "newWorktreeSession" || m.type === "removeWorktree")).toBe(false);
-    expect(labels(h.doc)).toContain("feat/composer-where");
-  });
-
-  it("omits branch and worktree outside a repository", () => {
+  it("omits the branch outside a repository", () => {
     const h = bootWebview({ ready: true, vscode: true });
     dispatch(h.window, { ...initial, cwd: "/home/notes" });
     dispatch(h.window, {
@@ -83,45 +110,12 @@ describe("composer location row", () => {
       folder: "notes",
       branch: null,
       detached: false,
+      branches: [],
       linkedWorktree: false,
       place: "cloud",
       kind: "not-a-repo",
     });
-    expect(labels(h.doc)).toEqual(["Cloud", "notes"]);
-  });
-
-  it("ignores a where frame for a checkout we have already left", () => {
-    const h = bootWebview({ ready: true, vscode: true });
-    dispatch(h.window, initial);
-    dispatch(h.window, { type: "sessionName", sessionId: "s1", name: "Here", cwd: "/work/n8n-workflows" });
-    dispatch(h.window, {
-      type: "composerWhere",
-      cwd: "/work/other",
-      folder: "other",
-      branch: "stale",
-      detached: false,
-      linkedWorktree: false,
-      place: "local",
-      kind: "ok",
-    });
-    expect(labels(h.doc)).toEqual(["Local", "n8n-workflows"]);
-  });
-
-  it("does not offer a new worktree from the remote client", () => {
-    const h = bootWebview({ ready: true, remote: true });
-    dispatch(h.window, initial);
-    dispatch(h.window, { type: "appPurpose", value: "coding" });
-    dispatch(h.window, {
-      type: "composerWhere",
-      cwd: "/work/n8n-workflows",
-      folder: "n8n-workflows",
-      branch: "main",
-      detached: false,
-      linkedWorktree: false,
-      place: "local",
-      kind: "ok",
-    });
-    expect(h.doc.querySelector(".where-worktree")).toBeNull();
-    expect(h.posted.some((m) => m.type === "newWorktreeSession")).toBe(false);
+    expect(labels(h.doc)).toEqual(["notes"]);
+    expect(h.doc.querySelector(".where-branch")).toBeNull();
   });
 });

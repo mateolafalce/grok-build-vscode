@@ -386,6 +386,9 @@ export function parseWebviewMsg(raw: unknown): WebviewMsg | null {
       if (raw.paths !== undefined
         && (!Array.isArray(raw.paths) || raw.paths.some((item) => !isString(item)))) return null;
       break;
+    case "switchBranch":
+      if (!isString(raw.cwd) || !raw.cwd || !isString(raw.branch) || !raw.branch) return null;
+      break;
     case "openProviderConfig":
     case "readProviderConfig":
       if (!isInternalProvider(raw.provider)) return null;

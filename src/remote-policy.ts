@@ -378,6 +378,9 @@ export const INBOUND_DISPOSITION: Record<WebviewMsg["type"], InboundDisposition>
   // names through a validator, and no `git clean` / `reset --hard` / `push
   // --force` in the set at all.
   gitRun: "full",
+  // Checkout of one local branch the host just listed for the open project.
+  // The name is checked against that list before `git checkout` sees it.
+  switchBranch: "full",
   removeChip: "propose",
   toggleChip: "propose",
   // attaches a chip only after an exact host mention-catalog lookup plus
@@ -599,6 +602,7 @@ export const REMOTE_REQUIRES_BOUND_SESSION: Record<WebviewMsg["type"], boolean> 
   gitFileDiff: false,
   turnFileDiff: false,
   gitRun: false,
+  switchBranch: false,
   send: true,
   newSession: false,
   cancel: true,
@@ -992,7 +996,7 @@ export const OUTBOUND_DISPOSITION: Record<HostMsg["type"], OutboundDisposition> 
   initialized: "mirror",
   cliUpdating: "mirror",
   session: "mirror",
-  // Same display class as the conversation name: folder, branch, worktree.
+  // Same display class as the conversation name: open-project folder and branch.
   composerWhere: "mirror",
   // Conversation names are already exposed in the remote history list, so
   // the focused-name update has the same display-only sensitivity.

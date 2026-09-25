@@ -26,6 +26,7 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
   composerWhereFromGit,
+  parseLocalBranchList,
   type ComposerWhere,
 } from "./composer-where";
 import {
@@ -35,6 +36,7 @@ import {
   GIT_TURN_BASELINE_ARGS,
   GIT_HEAD_ARGS,
   buildGitStatusSnapshot,
+  isValidBranchName,
   gitDiffArgs,
   gitDiffUntrackedArgs,
   gitTurnDiffArgs,
@@ -182,6 +184,38 @@ export function readComposerWhere(
   return runGit(root, GIT_WHERE_ARGS, { io: opts?.io, readOnly: true, timeoutMs: 8_000 }).then((result) =>
     composerWhereFromGit({ cwd: root, result, platform: opts?.platform }),
   );
+}
+
+/** Local branch names only. A failed read is an empty list, not a throw. */
+export const GIT_BRANCH_LIST_ARGS = ["for-each-ref", "--format=%(refname:short)", "refs/heads"] as const;
+
+export function readLocalBranches(
+  root: string,
+  opts?: { io?: GitIo },
+): Promise<string[]> {
+  return runGit(root, GIT_BRANCH_LIST_ARGS, { io: opts?.io, readOnly: true, timeoutMs: 8_000 }).then((result) =>
+    result.ok ? parseLocalBranchList(result.stdout) : [],
+  );
+}
+
+/**
+ * Check out one branch the host just listed.
+ * The name has to be in that list, so the client cannot invent a ref or a flag.
+ */
+export async function checkoutLocalBranch(
+  root: string,
+  branch: string,
+  opts?: { io?: GitIo },
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  if (!isValidBranchName(branch)) return { ok: false, reason: "That branch name is not valid." };
+  const listed = await readLocalBranches(root, opts);
+  if (!listed.includes(branch)) return { ok: false, reason: "That branch is not in this project." };
+  const result = await runGit(root, ["checkout", branch], { io: opts?.io, readOnly: false, timeoutMs: 60_000 });
+  if (!result.ok) {
+    const text = String(result.stderr || "").replace(/^fatal:\s*/gim, "").trim();
+    return { ok: false, reason: (text || "Could not switch branch.").slice(0, 500) };
+  }
+  return { ok: true };
 }
 
 /**
