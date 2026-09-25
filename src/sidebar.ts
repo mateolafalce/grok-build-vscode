@@ -17690,6 +17690,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     "createProject",
     "cloneProject",
     "setupGithubCli",
+    "refreshProviders",
     "listGithubRepos",
     // The rail renders the same clone form as the chat, so it can reach every
     // step of that form — including the token paste and the cancel that ends a
