@@ -1,6 +1,6 @@
 # Changelog
 
-## 4.11.1 — 2026-09-23
+## 4.11.1 — 2026-09-25
 
 **An agent you have not connected is never run.** Connecting an agent is now something you say, not something the extension works out by starting your CLI and seeing what happens.
 
