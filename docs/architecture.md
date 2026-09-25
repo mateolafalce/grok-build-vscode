@@ -98,9 +98,11 @@ located binary and a successful probe never write it, and
 than importing `grok.providerConnections`. Locating a CLI (`locateProvider`) is
 a filesystem check and still runs without consent, because Connect cannot be
 offered for a binary that is not on disk. Executing one does not. An
-unconnected provider's binary is never run — not for history, a model catalog,
-a version read, a credential probe, adapter empty-session deletion
-(`discardAdapterEmptySession`), an update, or a login retry.
+unconnected provider's binary is never run on the extension's own initiative —
+not for history, a model catalog, a version read, a credential probe, adapter
+empty-session deletion (`discardAdapterEmptySession`), an update, or a login
+retry. An action the person invokes by name still runs: **Grok: Log Out** runs
+`grok logout` whether or not Grok is connected.
 `providerRunSignal` aborts when consent is absent; `execProviderCli` refuses
 to spawn on that signal, and every `AcpClient` for that provider is constructed
 with it.
@@ -115,7 +117,12 @@ before `setProviderConnected` posts, so the first frame that says connected
 already says the credential is unproven — Settings acts on that frame, and a
 healthy one drops the bar that finishes sign-in and offers Sign out, which
 runs the vendor logout. The flag is not stored. Device-login verification, an
-explicit Re-check, and a real turn clear it when they have evidence. A
+explicit Re-check, and a real turn clear it. So does a Codex or Claude warm-up
+that fails for a reason that is not about credentials (an `Internal error` from
+`session/new`, say): such a failure says nothing about the sign-in, and a flag
+left standing once kept Codex unusable however often the person signed in. A
+cleared flag therefore means "no evidence the credential is bad", not proof it
+is good; the next real turn is what settles it. A
 credential failure leaves the account connected.
 
 `grok.providerModelCache` holds each provider's last advertised model list,
@@ -127,10 +134,12 @@ after consent, from `reprobeProviderCredentials`
 (`warmConnectedCodexModels` / `warmConnectedClaudeModels`): a short-lived
 adapter creates a session in a temporary scratch cwd, stores the advertised
 models, deletes that throwaway session through ACP, and disposes. That runs
-on Re-check, on device-login verification, when `refreshProviders` asks for
-credentials, and when a connected CLI's version changes against an existing
-cache. The Connect press itself records consent and reads `--version`; it does
-not open that session. A warm-up failure is logged and does not clear consent.
+on Re-check, on each rung of the desk terminal watcher (the first immediately
+after Connect), when `refreshProviders` asks for credentials, when a connected
+CLI's version changes against an existing cache, and on device-login
+verification — for Claude only when `claude auth status` cannot answer, since
+that check runs first. The Connect press records consent and reads
+`--version`; on the desk it is the watcher that opens the warm-up session. A warm-up failure is logged and does not clear consent.
 
 If no Codex binary is found, onboarding can install the pinned official
 `rust-v0.153.4` standalone package into versioned global storage. The download is
@@ -1056,7 +1065,7 @@ Release-blocking provider invariants: queued sign-out drafts are persisted in
 startup; `needsProvider` and draft-bearing sessions survive every park, release,
 sweep, and reaper path, including detached remote tabs. Sign-out notices are
 transient desk frames, never replayable session history. Codex credential probes
-use `isCodexCredentialError`. Device-login verification retries until a credential is observed or the attempts run out; a desk terminal login is watched by the same bounded ladder. Re-check
+use `isCodexCredentialError`. Device-login verification retries until a credential is observed or the attempts run out; a desk terminal login is watched by a longer ladder of its own (`watchProviderLogin`: 0/2/5/10/20/30/60s against verification's 0/2/5/10/20s). Re-check
 bypasses history freshness. Durable `recheckConnection` is host-local, while a
 remote `retryProviderSession` can restart only an already-connected provider.
 
