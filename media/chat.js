@@ -1869,7 +1869,7 @@
     // "Pull request:", "**Pull request:**" (colon inside the marks) and
     // "**Pull request**:". `\b` so "Preview:" is not read as a "PR" label.
     rest = rest.replace(/^(?:\*\*|__)?\s*(?:pull request|pr)\b\s*:?\s*(?:\*\*|__)?\s*:?\s*/i, "");
-    rest = rest.replace(/^(?:\*\*|__|`)([\s\S]+)(?:\*\*|__|`)$/, "$1").trim();
+    rest = rest.replace(/^(\*\*|__)([\s\S]+)\1$/, "$2").trim();
     const urlMatch = rest.match(/^(https?:\/\/\S+)$/i);
     if (!urlMatch) return null;
     return parseGitHubPullUrl(urlMatch[1].replace(/[.,);:\]]+$/, ""));
@@ -1897,11 +1897,11 @@
       .replace(/&amp;/g, "&");
   }
 
-  // Sentence punctuation glued to an address ("…/pull/17.") is not part of the URL.
+  // Leave sentence punctuation and closing emphasis outside the held URL.
   function splitUrlTrailing(raw) {
     let url = raw;
     let trailing = "";
-    while (url && /[.,;:!?]$/.test(url)) {
+    while (url && /[.,;:!?*_]$/.test(url)) {
       trailing = url.slice(-1) + trailing;
       url = url.slice(0, -1);
     }
@@ -2006,22 +2006,27 @@
       // <code> tags mean nothing to a regex (#143). Same shape reaches a URL
       // containing `*`, and a [link](x) written inside backticks.
       //
-      // Link TEXT is deliberately left live: [**bold**](url) is valid markdown
-      // and worked before, so only the href is held.
+      // Format link labels before holding the whole anchor, so URLs in the
+      // label cannot be linkified again.
       const held = [];
       const hold = (html) => `\x00C${held.push(html) - 1}\x00`;
+      const restore = (html) => html.replace(/\x00C(\d+)\x00/g, (_, i) => held[+i]);
+      const emphasis = (text) => text
+        .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+        .replace(/\*([^*\n]+)\*/g, "<em>$1</em>")
+        .replace(/(^|[^\p{L}\p{N}_])_([^_\n]+)_(?=$|[^\p{L}\p{N}_])/gu, "$1<em>$2</em>");
       // `raw` is the address after HTML escaping. A GitHub pull URL is the chip;
       // any other http(s) address is an ordinary link. Both are held so the
       // emphasis pass cannot see characters inside them.
-      function linkifyUrl(raw) {
-        const { url, trailing } = splitUrlTrailing(raw);
+      function linkifyUrl(raw, autolink = false) {
+        const { url, trailing } = autolink ? { url: raw, trailing: "" } : splitUrlTrailing(raw);
         if (!url) return raw;
         const pr = parseGitHubPullUrl(unescapeHtml(url));
         if (pr) return hold(pullRequestChipHtml(pr)) + trailing;
         const href = url.replace(/"/g, "&quot;");
         return hold(`<a href="${href}">${url}</a>`) + trailing;
       }
-      return t
+      const protectedText = t
         .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
         .replace(/`([^`\n]+)`/g, (_, code) => {
           if (looksLikeFileRef(code)) {
@@ -2037,14 +2042,13 @@
           // its label and emphasis survive.
           if (pr && /^https?:\/\//i.test(text.trim())) return hold(pullRequestChipHtml(pr));
           const safe = url.replace(/"/g, "&quot;");
-          if (/^https?:\/\//i.test(text.trim())) return hold(`<a href="${safe}">${text}</a>`);
-          return `<a href="${hold(safe)}">${text}</a>`;
+          return hold(`<a href="${safe}">${restore(emphasis(text))}</a>`);
         })
-        .replace(/https?:\/\/[^\s<]+/g, (raw) => linkifyUrl(raw))
-        .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
-        .replace(/\*([^*\n]+)\*/g, "<em>$1</em>")
-        .replace(/(^|[^\p{L}\p{N}_])_([^_\n]+)_(?=$|[^\p{L}\p{N}_])/gu, "$1<em>$2</em>")
-        .replace(/\x00C(\d+)\x00/g, (_, i) => held[+i]);
+        .replace(/&lt;(https?:\/\/[^\s\x00]*?)&gt;/g, (_, url) => linkifyUrl(url, true));
+      // Hold bare URLs before emphasis so their interiors stay literal. Closing
+      // delimiters remain outside the placeholder for the emphasis pass to pair.
+      return restore(emphasis(protectedText
+        .replace(/https?:\/\/[^\s<\x00]+/g, (raw) => linkifyUrl(raw))));
     }
 
     // GFM tables: header row | separator row (|---|---|) | data rows

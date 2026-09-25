@@ -127,6 +127,59 @@ describe("shared markdown renderer (window.__grokRenderMarkdown)", () => {
   });
 });
 
+describe("markdown linkification edge cases (#185)", () => {
+  it("keeps a standalone backticked PR URL literal", () => {
+    const url = "https://github.com/acme/widgets/pull/17";
+    for (const prefix of ["", "Pull request: "]) {
+      const html = render(`${prefix}\`${url}\`\n`);
+      expect(html).toContain(`<code>${url}</code>`);
+      expect(html).not.toContain("<a ");
+    }
+  });
+
+  it("keeps emphasis delimiters out of a bare URL's target", () => {
+    const url = "https://example.com/docs";
+    for (const [mark, tag] of [["**", "strong"], ["*", "em"], ["_", "em"]]) {
+      expect(render(`${mark}${url}${mark}\n`)).toContain(
+        `<${tag}><a href="${url}">${url}</a></${tag}>`,
+      );
+    }
+  });
+
+  it("keeps asterisks inside a bare URL literal", () => {
+    for (const url of ["https://e.com/a*b*c", "https://e.com/path/*a*/file"]) {
+      expect(render(`see ${url}\n`)).toBe(`see <a href="${url}">${url}</a>`);
+      expect(render(`**${url}**\n`)).toBe(`<strong><a href="${url}">${url}</a></strong>`);
+    }
+  });
+
+  it("keeps underscores inside a bare URL literal", () => {
+    const url = "https://e.com/path/_a_/file";
+    expect(render(`see ${url}\n`)).toBe(`see <a href="${url}">${url}</a>`);
+    expect(render(`_${url}_\n`)).toBe(`<em><a href="${url}">${url}</a></em>`);
+  });
+
+  it("links an angle-bracket autolink without including its brackets", () => {
+    const url = "https://example.com/docs";
+    expect(render(`<${url}>\n`)).toBe(`<a href="${url}">${url}</a>`);
+    const query = `${url}?a=1&b=2`;
+    expect(render(`<${query}>\n`)).toBe(
+      `<a href="${url}?a=1&amp;b=2">${url}?a=1&amp;b=2</a>`,
+    );
+  });
+
+  it("does not linkify a URL inside a named Markdown link's label", () => {
+    for (const url of ["https://example.com/docs", "https://github.com/acme/widgets/pull/17"]) {
+      const html = render(`[Read **docs** at ${url} with \`code\`](https://example.org/guide)\n`);
+      expect(html).toBe(
+        `<a href="https://example.org/guide">Read <strong>docs</strong> at ${url} with <code>code</code></a>`,
+      );
+      expect(html.match(/<a\b/g)).toHaveLength(1);
+      expect(html).not.toContain(String.fromCharCode(0));
+    }
+  });
+});
+
 describe("CRLF files render like LF ones", () => {
   // Most files on Windows are CRLF, and the desktop panel renders whole files
   // off disk, so this was the normal case rather than an edge one.
