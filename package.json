@@ -1,7 +1,7 @@
 {
   "name": "grok-vscode-phuryn",
-  "displayName": "Grok Build for VS Code (Community)",
-  "description": "GUI for Grok Build CLI (incl. Grok 4.7). Remote Control from your phone, voice control, multiple sessions, images and videos, Mermaid diagrams, and LaTeX. Works with SuperGrok, X Premium+, and xAI API key. Fair Source (FSL-1.1-MIT). Not affiliated with or endorsed by SpaceXAI (formerly xAI).",
+  "displayName": "GUI for Grok Build & Muse Code",
+  "description": "GUI for Grok Build (incl. Grok 4.7) and Muse Code — and for Codex and Claude Code in the same window. Remote Control from your phone, voice control, multiple sessions, images and videos, Mermaid diagrams, and LaTeX. Works with SuperGrok, X Premium+, and xAI API key. Fair Source (FSL-1.1-MIT). Not affiliated with or endorsed by SpaceXAI (formerly xAI), Meta, OpenAI or Anthropic.",
   "version": "4.11.1",
   "publisher": "PawelHuryn",
   "author": {
@@ -37,7 +37,16 @@
     "chat",
     "thinking",
     "tool-calls",
-    "sidebar"
+    "sidebar",
+    "codex",
+    "openai-codex",
+    "claude",
+    "claude-code",
+    "muse",
+    "muse-code",
+    "meta",
+    "coding-agent",
+    "gui"
   ],
   "icon": "resources/grok-icon.png",
   "main": "./out/extension.js",
