@@ -992,6 +992,8 @@ export const OUTBOUND_DISPOSITION: Record<HostMsg["type"], OutboundDisposition> 
   initialized: "mirror",
   cliUpdating: "mirror",
   session: "mirror",
+  // Same display class as the conversation name: folder, branch, worktree.
+  composerWhere: "mirror",
   // Conversation names are already exposed in the remote history list, so
   // the focused-name update has the same display-only sensitivity.
   sessionName: "mirror",
@@ -1191,6 +1193,9 @@ export const OUTBOUND_PROJECT_AUTH: Record<HostMsg["type"], OutboundProjectAuth>
   sessionRemoved: "message-cwd",
   // Session-scoped live + restore payload — requires authorized session/repo cwd.
   session: "scope",
+  // Posted with the session, so the session cwd is the scope. The frame's own
+  // cwd is that same checkout (a worktree path is not always a catalog row).
+  composerWhere: "scope",
   sessionDot: "scope",
   chips: "scope",
   modelChanged: "scope",

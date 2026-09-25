@@ -613,6 +613,23 @@ export type HostMsg =
   | { type: "cliUpdating" }
   // `worktree` gates the gear's Apply/Remove worktree items to worktree sessions.
   | { type: "session"; sessionId: string; models: ModelInfo[]; currentModelId: string | undefined; worktree?: boolean; provider?: AcpProvider }
+  /**
+   * Where the focused checkout is standing: folder leaf, branch, and whether
+   * it is a linked worktree. The host reads git. The client paints it.
+   * Additive: a client that never sees the frame keeps a composer with no row.
+   */
+  | {
+      type: "composerWhere";
+      cwd: string;
+      folder: string;
+      branch: string | null;
+      detached: boolean;
+      linkedWorktree: boolean;
+      /** Set when this session was started as one of our worktrees. */
+      worktreeLabel?: string;
+      place: "local" | "cloud";
+      kind: "ok" | "no-git" | "not-a-repo";
+    }
   // The focused conversation's display name, using the same precedence as a
   // history row. It is separate from `sessions` because VS Code does not keep
   // that browser-only list populated while the history popover is closed.
@@ -1528,7 +1545,7 @@ export type WebviewMsg =
 // union without failing the build.
 const HOST_MESSAGE_TYPE_MAP: Record<HostMsg["type"], true> = {
   initialState: true, moveViewHint: true, welcomeTips: true, projectSetup: true, githubState: true, githubRepos: true, providerState: true, mcpServers: true, mcpConnectors: true, mcpConnectorAuthorization: true, routines: true, codexInstallProgress: true, planModeAvailability: true, showThinking: true, appPurpose: true, fontScale: true, grokUpdateStatus: true, updateAvailable: true, updateReady: true, telemetryEnabled: true, thumbsFeedback: true,
-  initialized: true, cliUpdating: true, session: true, sessionName: true, modelChanged: true,
+  initialized: true, cliUpdating: true, session: true, sessionName: true, composerWhere: true, modelChanged: true,
   modeChanged: true, openModePopover: true, voiceState: true, voiceConfigured: true,
   voicePartial: true, voiceSubmit: true, voiceTranscript: true, voiceError: true,
   chips: true, commandsUpdate: true, mentionResults: true, projectDirListing: true, projectFileContent: true, projectFileWriteResult: true, gitStatusResult: true, gitFileDiffResult: true, turnFileDiffResult: true, turnDiffBaseline: true, gitRunResult: true, userMessage: true, agentStart: true,

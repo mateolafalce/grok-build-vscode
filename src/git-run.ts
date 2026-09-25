@@ -25,6 +25,10 @@ import { execFile as nodeExecFile } from "node:child_process";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  composerWhereFromGit,
+  type ComposerWhere,
+} from "./composer-where";
+import {
   GIT_NUMSTAT_ARGS,
   GIT_REMOTE_ARGS,
   GIT_STATUS_ARGS,
@@ -156,6 +160,29 @@ const NOT_A_REPO = /not a git repository|does not appear to be a git repository/
 export type GitStatusRead =
   | { ok: true; snapshot: GitStatusSnapshot }
   | { ok: false; reason: string; kind: "no-git" | "not-a-repo" | "failed" };
+
+/**
+ * The four rev-parse questions the composer location row needs, in one process.
+ * Order is the parser's contract: inside, abbrev-ref, git dir, common dir.
+ */
+export const GIT_WHERE_ARGS = [
+  "rev-parse",
+  "--is-inside-work-tree",
+  "--abbrev-ref",
+  "HEAD",
+  "--git-dir",
+  "--git-common-dir",
+] as const;
+
+/** Branch and linked-worktree fact for one checkout. Never rejects. */
+export function readComposerWhere(
+  root: string,
+  opts?: { io?: GitIo; platform?: NodeJS.Platform },
+): Promise<ComposerWhere> {
+  return runGit(root, GIT_WHERE_ARGS, { io: opts?.io, readOnly: true, timeoutMs: 8_000 }).then((result) =>
+    composerWhereFromGit({ cwd: root, result, platform: opts?.platform }),
+  );
+}
 
 /**
  * Read everything the Changes view shows, in as few calls as the answers need.

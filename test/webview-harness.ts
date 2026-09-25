@@ -52,6 +52,7 @@ export const BODY = `
   <footer class="composer">
     <button id="scroll-bottom-btn" class="scroll-bottom-btn" type="button" title="Scroll to bottom"></button>
     <div class="composer-card">
+      <div id="composer-where" class="composer-where" hidden></div>
       <div id="attachments" class="attachments"></div>
       <div class="composer-input-wrap">
         <div id="input-highlight" class="input-highlight" aria-hidden="true" dir="auto"></div>

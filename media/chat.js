@@ -580,6 +580,8 @@
     currentModeId: "agent",
     effort: "",
     cwd: "",
+    /** Last `composerWhere` frame. Null until the host has read git. */
+    composerWhere: null,
     contextWindow: 200000,
     usedTokens: 0,
     useCtrlEnter: false,
@@ -1110,6 +1112,8 @@
     mic: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>`,
     cornerDownRight: `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 10 20 15 15 20"/><path d="M4 4v7a4 4 0 0 0 4 4h12"/></svg>`,
     gitBranch: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>`,
+    monitor: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>`,
+    cloud: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>`,
     gitFork: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"/><path d="M12 12v3"/></svg>`,
     // Undo / rewind — used on user-bubble action row (P2-9).
     undo: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6.7 3L3 13"/></svg>`,
@@ -5189,6 +5193,139 @@
     const parts = String(cwd || "").replace(/[\\/]+$/, "").split(/[\\/]+/).filter(Boolean);
     return parts[parts.length - 1] || "Repository";
   };
+
+  function whereCwd() {
+    const named = activeSessionName();
+    return (named && named.cwd) || state.cwd || "";
+  }
+
+  /**
+   * One chip in the location row. A span when it only reports a fact, a button
+   * when the click does something (copy the path, switch repo, start a worktree).
+   */
+  function whereChip(opts) {
+    const el = document.createElement(opts.actionable ? "button" : "span");
+    if (opts.actionable) el.type = "button";
+    el.className = "where-chip" + (opts.className ? " " + opts.className : "") + (opts.actionable ? " actionable" : "");
+    if (opts.title) el.title = opts.title;
+    if (opts.box) {
+      const box = document.createElement("span");
+      box.className = "where-box";
+      box.setAttribute("aria-hidden", "true");
+      if (opts.checked) box.innerHTML = ICON.check;
+      el.appendChild(box);
+    } else if (opts.icon) {
+      const icon = document.createElement("span");
+      icon.className = "where-icon";
+      icon.setAttribute("aria-hidden", "true");
+      icon.innerHTML = opts.icon;
+      el.appendChild(icon);
+    }
+    const label = document.createElement("span");
+    label.className = "where-label";
+    label.textContent = opts.label || "";
+    el.appendChild(label);
+    return el;
+  }
+
+  /** Claude-style row: Local/Cloud, folder, branch, worktree. */
+  function renderComposerWhere() {
+    const root = $("composer-where");
+    if (!root) return;
+    const live = whereCwd();
+    // A frame for the checkout we just left must not relabel the one we are in.
+    // It stays stored so a sessionName that catches up can still use it.
+    const stored = state.composerWhere;
+    const reported = stored && (!live || !stored.cwd || sameCwd(stored.cwd, live)) ? stored : null;
+    const cwd = (reported && reported.cwd) || live;
+    const leaf = (reported && reported.folder) || (cwd ? cwdLeaf(cwd) : "");
+    if (!leaf) {
+      root.hidden = true;
+      root.replaceChildren();
+      return;
+    }
+    const place = reported && reported.place === "cloud" ? "cloud" : "local";
+    const linked = !!(reported && reported.linkedWorktree) || !!state.isWorktree;
+    const kind = reported ? reported.kind : "";
+    const showBranch = kind === "ok" && !!(reported.detached || reported.branch);
+    const canStart = isCodingPurpose() && state.worktreeSupported && !linked && !IS_REMOTE && kind === "ok";
+    // Checked when this checkout already is a worktree. The empty box is the
+    // Coding action that starts one, so Knowledge work does not grow a control
+    // that does nothing.
+    const showWorktree = linked || canStart;
+    const labelText = reported && reported.worktreeLabel ? reported.worktreeLabel : "";
+
+    root.hidden = false;
+    root.replaceChildren();
+    root.appendChild(whereChip({
+      className: "where-place",
+      icon: place === "cloud" ? ICON.cloud : ICON.monitor,
+      label: place === "cloud" ? "Cloud" : "Local",
+      title: place === "cloud" ? "This session runs in the cloud" : "This session runs on this machine",
+    }));
+
+    const folderEl = whereChip({
+      className: "where-folder",
+      icon: ICON.folder,
+      label: leaf,
+      title: repoSwitcherAvailable() ? "Choose repository" : (cwd || leaf),
+      actionable: true,
+    });
+    folderEl.onclick = (e) => {
+      e.stopPropagation();
+      if (repoSwitcherAvailable()) {
+        openRepoPopover();
+        return;
+      }
+      if (!cwd || !navigator.clipboard || !navigator.clipboard.writeText) return;
+      navigator.clipboard.writeText(cwd).then(() => {
+        const label = folderEl.querySelector(".where-label");
+        if (!label) return;
+        const prev = label.textContent;
+        label.textContent = "Copied";
+        setTimeout(() => { if (label.textContent === "Copied") label.textContent = prev; }, 1200);
+      }).catch(() => {});
+    };
+    root.appendChild(folderEl);
+
+    if (showBranch) {
+      const branchLabel = reported.detached ? "Detached" : reported.branch;
+      root.appendChild(whereChip({
+        className: "where-branch",
+        icon: ICON.gitBranch,
+        label: branchLabel,
+        title: reported.detached ? "Detached HEAD" : reported.branch,
+      }));
+    }
+
+    if (showWorktree) {
+      const chip = whereChip({
+        className: "where-worktree",
+        box: true,
+        checked: linked,
+        label: "worktree",
+        title: linked
+          ? (labelText ? "Worktree: " + labelText : "This folder is a git worktree")
+          : (canStart ? "Start the next session in a new worktree" : "Not a worktree"),
+        actionable: canStart,
+      });
+      chip.setAttribute("role", "checkbox");
+      chip.setAttribute("aria-checked", linked ? "true" : "false");
+      chip.onclick = (e) => {
+        e.stopPropagation();
+        if (!canStart) return;
+        vscode.postMessage({ type: "newWorktreeSession" });
+      };
+      root.appendChild(chip);
+    }
+  }
+
+  function noteComposerWhereCwd(cwd) {
+    if (state.composerWhere && state.composerWhere.cwd && cwd && !sameCwd(state.composerWhere.cwd, cwd)) {
+      state.composerWhere = null;
+    }
+    renderComposerWhere();
+  }
 
   // The repo switcher is a REMOTE-only affordance, and even there only once the
   // host has proved it speaks `repos`. Two independent reasons:
@@ -18496,6 +18633,7 @@
         }
         refreshModelControls();
         state.cwd = msg.cwd || "";
+        noteComposerWhereCwd(state.cwd);
         state.extVersion = msg.extVersion || "";
         // Field presence, not a version check: an older host sends neither, and
         // the About panel then keeps its local shape rather than naming a
@@ -18867,6 +19005,7 @@
         if (!addPopover.hidden) renderAddPopover();
         refreshModelControls();
         syncGearPlacement();
+        renderComposerWhere();
         break;
       case "fontScale":
         // Live chat-only zoom (grok.chatFontScale). Initial value is baked into
@@ -19084,6 +19223,7 @@
         renderCodexUpdateNudge();
         if (state.railTransition?.kind === "new") renderRail();
         state.isWorktree = !!msg.worktree; // gates the gear Apply/Remove worktree items
+        renderComposerWhere();
         state.availableModels = (msg.models || []).filter(m => (m.provider || msg.provider) !== "muse" || museAvailable);
         if (currentModel()?.reasoningEffort) state.effort = currentModel().reasoningEffort;
         refreshModelControls();
@@ -19126,6 +19266,7 @@
           renderSessionName();
           renderSessionHead();
         }
+        noteComposerWhereCwd(next.cwd || state.cwd);
         pendingSessionChromeReset = false;
         if (prev && !sameId) {
           focusComposerIfAllowed();
@@ -20545,6 +20686,21 @@
         ensureRemoteFilesBrowser();
         // A rail "+" on another repo waits for the switch to land before starting
         // the session, so it can never open one in the repo we were leaving.
+        break;
+      }
+      case "composerWhere": {
+        const cwd = String(msg.cwd || "");
+        state.composerWhere = {
+          cwd,
+          folder: String(msg.folder || ""),
+          branch: typeof msg.branch === "string" && msg.branch ? msg.branch : null,
+          detached: !!msg.detached,
+          linkedWorktree: !!msg.linkedWorktree,
+          worktreeLabel: typeof msg.worktreeLabel === "string" ? msg.worktreeLabel : "",
+          place: msg.place === "cloud" ? "cloud" : "local",
+          kind: msg.kind === "no-git" || msg.kind === "not-a-repo" ? msg.kind : "ok",
+        };
+        renderComposerWhere();
         break;
       }
       case "sessionDot":

@@ -295,7 +295,7 @@ import {
   resolveRemoteFileRoot,
   writeRemoteProjectFile,
 } from "./remote-files";
-import { GitRunGate, captureGitTurnBaseline, readGitFileDiff, readGitTurnFileBefore, readGitStatus, runGitPlan, type GitTurnBaseline } from "./git-run";
+import { GitRunGate, captureGitTurnBaseline, readComposerWhere, readGitFileDiff, readGitTurnFileBefore, readGitStatus, runGitPlan, type GitTurnBaseline } from "./git-run";
 import { describeGitFailure, isKnownChangedPath, planGitOp } from "./git-status";
 import {
   isCloudEnvironment,
@@ -899,6 +899,8 @@ export class GrokSidebar {
    * describe a tree that no longer exists.
    */
   private readonly gitRunGate = new GitRunGate();
+  /** Drops a location read that a newer checkout superseded. */
+  private composerWhereFlight = 0;
   private readonly turnDiffBaselines = new Map<string, { root: string } & Partial<GitTurnBaseline>>();
   private readonly pendingTurnDiffCaptures = new WeakSet<object>();
   /** Cold session/load claims the persisted id before ACP has emitted `session`. */
@@ -12772,6 +12774,9 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
           reply({ type: "gitRunResult", ...correlation, cwd: msg.cwd, op, ok: true, snapshot });
         } finally {
           this.gitRunGate.release(root);
+          // A new branch, a commit, a checkout: the chip should match the tree
+          // the Changes view just wrote, without waiting for the next turn.
+          this.scheduleComposerWhere(session);
         }
         break;
       }
@@ -14014,10 +14019,42 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     return fallbackName(first, Date.now());
   }
 
+  /**
+   * Folder, branch, and worktree for the composer row.
+   *
+   * A newer call bumps the flight so a slow read of the checkout we just left
+   * cannot paint over the one we are in. The client never asks git itself.
+   */
+  private scheduleComposerWhere(session: Session = this.focused): void {
+    const flight = ++this.composerWhereFlight;
+    const cwd = this.sessionCwd(session);
+    if (!cwd) return;
+    void readComposerWhere(cwd).then((where) => {
+      if (flight !== this.composerWhereFlight) return;
+      if (!pathsEqual(this.sessionCwd(session), cwd)) return;
+      const message: HostMsg = {
+        type: "composerWhere",
+        cwd,
+        folder: where.folder || path.basename(cwd),
+        branch: where.branch,
+        detached: where.detached,
+        linkedWorktree: where.linkedWorktree || !!session.worktree,
+        ...(session.worktree?.label ? { worktreeLabel: session.worktree.label } : {}),
+        place: isCloudEnvironment() ? "cloud" : "local",
+        kind: where.kind,
+      };
+      if (session === this.focused) this.postLocal(message);
+      if (session.activeSessionId) this.sendRemoteSession(session, message);
+    });
+  }
+
   /** Push the focused conversation's title independently of history pagination.
    *  The VS Code webview must not depend on the history popover having been
    *  opened, while remote tabs need the same live update after a rename or turn. */
   private postSessionName(session: Session, name = this.sessionDisplayName(session)): void {
+    // The name and the checkout move together. Refresh the location row even
+    // when there is no id yet, so the welcome screen can already say the branch.
+    this.scheduleComposerWhere(session);
     const id = session.activeSessionId;
     if (!id) return;
     const cwd = this.sessionCwd(session);
@@ -17410,6 +17447,7 @@ ${many ? `${working.length} conversations are` : "A conversation is"} still work
     // cache so postVoiceConfigured below is not swallowed against the old view.
     this.forgetPostedVoiceConfigured("local");
     this.post(this.buildInitialStateMsg());
+    this.scheduleComposerWhere();
     this.postProviderState();
     void this.refreshGithubState();
     this.postMcpConnectors();
@@ -21719,6 +21757,7 @@ ${fileShellOpen}
   <footer class="composer">
     <button id="scroll-bottom-btn" class="scroll-bottom-btn" type="button" title="Scroll to bottom"></button>
     <div class="composer-card">
+      <div id="composer-where" class="composer-where" hidden></div>
       <div id="attachments" class="attachments"></div>
       <div class="composer-input-wrap">
         <div id="input-highlight" class="input-highlight" aria-hidden="true" dir="auto"></div>

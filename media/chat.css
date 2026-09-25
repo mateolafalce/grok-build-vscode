@@ -3703,6 +3703,74 @@ body.hide-turn-diff-summary .turn-diff-summary { display: none; }
   border-color: var(--vscode-focusBorder);
 }
 
+/* Where this session is standing. Same facts Claude Code puts above the
+   prompt: machine, folder, branch, worktree. Quiet chips, not a second toolbar. */
+.composer-where {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 8px 2px;
+  min-width: 0;
+}
+.composer-where[hidden] { display: none; }
+.where-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  min-width: 0;
+  height: 24px;
+  margin: 0;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--vscode-foreground) 14%, transparent);
+  background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
+  color: var(--vscode-descriptionForeground, var(--vscode-foreground));
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  cursor: default;
+}
+.where-chip.actionable { cursor: pointer; }
+.where-chip.actionable:hover {
+  background: color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
+}
+.where-icon {
+  display: inline-flex;
+  flex: none;
+}
+.where-icon svg { display: block; }
+.where-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.where-folder { max-width: 34cqw; }
+.where-branch { max-width: 46cqw; }
+.where-box {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid currentColor;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  opacity: 0.75;
+}
+.where-worktree[aria-checked="true"] .where-box {
+  background: var(--vscode-foreground);
+  color: var(--vscode-editor-background, #1e1e1e);
+  border-color: var(--vscode-foreground);
+  opacity: 1;
+}
+.where-worktree[aria-checked="true"] .where-box svg {
+  width: 10px;
+  height: 10px;
+}
+
 /* Scroll to bottom (#16). Anchored to the composer rather than the message
    area, so it sits inside the `--chat-zoom` scaled coordinate space and stays
    correctly placed above the input at any font scale. Hidden (opacity + no
