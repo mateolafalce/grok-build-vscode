@@ -1111,6 +1111,9 @@
     cornerDownRight: `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 10 20 15 15 20"/><path d="M4 4v7a4 4 0 0 0 4 4h12"/></svg>`,
     gitBranch: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>`,
     gitFork: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"/><path d="M12 12v3"/></svg>`,
+    // Lucide git-pull-request / external-link, at the chip's 12px size.
+    gitPullRequest: `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" x2="6" y1="9" y2="21"/></svg>`,
+    externalLink: `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>`,
     // Undo / rewind — used on user-bubble action row (P2-9).
     undo: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6.7 3L3 13"/></svg>`,
     // Remote Control gear section (sign in / continue remotely / sign out / how it works).
@@ -1834,6 +1837,81 @@
   // HTML in a README cannot become live markup.
   window.__grokRenderMarkdown = (raw) => renderMarkdown(String(raw == null ? "" : raw));
 
+  // Bare http(s) addresses are not markdown links, so a reply like
+  // "abierto: https://github.com/owner/repo/pull/17" used to be plain text.
+  // Those addresses become links. A GitHub pull URL becomes the PR chip
+  // wherever it sits, including mid-sentence. The transcript click handler
+  // already opens http(s) hrefs in the browser.
+  function parseGitHubPullUrl(raw) {
+    let url;
+    try {
+      url = new URL(raw);
+    } catch {
+      return null;
+    }
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    if (url.username || url.password) return null;
+    const host = url.hostname.toLowerCase();
+    if (host !== "github.com" && host !== "www.github.com") return null;
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (parts.length < 4 || parts[2] !== "pull" || !/^\d+$/.test(parts[3])) return null;
+    if (!/^[A-Za-z0-9_.-]+$/.test(parts[0]) || !/^[A-Za-z0-9_.-]+$/.test(parts[1])) return null;
+    return {
+      href: url.href,
+      owner: parts[0],
+      repo: parts[1],
+      number: parts[3],
+    };
+  }
+
+  function pullRequestFromLine(line) {
+    let rest = String(line || "").trim();
+    // "Pull request:", "**Pull request:**" (colon inside the marks) and
+    // "**Pull request**:". `\b` so "Preview:" is not read as a "PR" label.
+    rest = rest.replace(/^(?:\*\*|__)?\s*(?:pull request|pr)\b\s*:?\s*(?:\*\*|__)?\s*:?\s*/i, "");
+    rest = rest.replace(/^(?:\*\*|__|`)([\s\S]+)(?:\*\*|__|`)$/, "$1").trim();
+    const urlMatch = rest.match(/^(https?:\/\/\S+)$/i);
+    if (!urlMatch) return null;
+    return parseGitHubPullUrl(urlMatch[1].replace(/[.,);:\]]+$/, ""));
+  }
+
+  function pullRequestChipHtml(pr) {
+    const href = escapeHtml(pr.href).replace(/"/g, "&quot;");
+    const repo = `${pr.owner}/${pr.repo}`;
+    const aria = escapeHtml(`Open pull request #${pr.number} (${repo}) in the browser`).replace(/"/g, "&quot;");
+    return (
+      `<a class="pr-open" href="${href}" title="${aria}" aria-label="${aria}">` +
+        `<span class="pr-open-mark" aria-hidden="true">${ICON.gitPullRequest}</span>` +
+        `<span class="pr-open-label">${escapeHtml(`PR #${pr.number}`)}</span>` +
+        `<span class="pr-open-repo">${escapeHtml(repo)}</span>` +
+        `<span class="pr-open-ext" aria-hidden="true">${ICON.externalLink}</span>` +
+      `</a>`
+    );
+  }
+
+  function unescapeHtml(s) {
+    return String(s)
+      .replace(/&quot;/g, '"')
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&amp;/g, "&");
+  }
+
+  // Sentence punctuation glued to an address ("…/pull/17.") is not part of the URL.
+  function splitUrlTrailing(raw) {
+    let url = raw;
+    let trailing = "";
+    while (url && /[.,;:!?]$/.test(url)) {
+      trailing = url.slice(-1) + trailing;
+      url = url.slice(0, -1);
+    }
+    if (url.endsWith(")") && !url.includes("(")) {
+      trailing = ")" + trailing;
+      url = url.slice(0, -1);
+    }
+    return { url, trailing };
+  }
+
   function renderMarkdown(raw) {
     // Normalise line endings FIRST. Everything below splits on a newline and
     // then tests each line with $-anchored patterns -- and a carriage return
@@ -1932,6 +2010,17 @@
       // and worked before, so only the href is held.
       const held = [];
       const hold = (html) => `\x00C${held.push(html) - 1}\x00`;
+      // `raw` is the address after HTML escaping. A GitHub pull URL is the chip;
+      // any other http(s) address is an ordinary link. Both are held so the
+      // emphasis pass cannot see characters inside them.
+      function linkifyUrl(raw) {
+        const { url, trailing } = splitUrlTrailing(raw);
+        if (!url) return raw;
+        const pr = parseGitHubPullUrl(unescapeHtml(url));
+        if (pr) return hold(pullRequestChipHtml(pr)) + trailing;
+        const href = url.replace(/"/g, "&quot;");
+        return hold(`<a href="${href}">${url}</a>`) + trailing;
+      }
       return t
         .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
         .replace(/`([^`\n]+)`/g, (_, code) => {
@@ -1942,9 +2031,16 @@
           return hold(`<code>${code}</code>`);
         })
         .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, text, url) => {
+          const pr = parseGitHubPullUrl(unescapeHtml(url));
+          // The visible text is the address itself: show the chip, not the raw URL.
+          // A named link ([#82](url), [**bold**](url)) stays a normal anchor so
+          // its label and emphasis survive.
+          if (pr && /^https?:\/\//i.test(text.trim())) return hold(pullRequestChipHtml(pr));
           const safe = url.replace(/"/g, "&quot;");
+          if (/^https?:\/\//i.test(text.trim())) return hold(`<a href="${safe}">${text}</a>`);
           return `<a href="${hold(safe)}">${text}</a>`;
         })
+        .replace(/https?:\/\/[^\s<]+/g, (raw) => linkifyUrl(raw))
         .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
         .replace(/\*([^*\n]+)\*/g, "<em>$1</em>")
         .replace(/(^|[^\p{L}\p{N}_])_([^_\n]+)_(?=$|[^\p{L}\p{N}_])/gu, "$1<em>$2</em>")
@@ -2072,6 +2168,16 @@
       if (bm) {
         closeFrom(0);
         out += `\x00B${bm[1]}\x00`;
+        lastWasBlock = true;
+        lastPara = false;
+        pendingBreak = false;
+        continue;
+      }
+
+      const pr = pullRequestFromLine(line);
+      if (pr) {
+        closeFrom(0);
+        out += pullRequestChipHtml(pr);
         lastWasBlock = true;
         lastPara = false;
         pendingBreak = false;

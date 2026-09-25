@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **A pull request address is a button, and other web addresses are links.** A GitHub pull URL renders as a chip with the PR number and the repository, whether it stands alone or sits in a sentence (`abierto: https://github.com/owner/repo/pull/17`). Any other `http` or `https` address in the reply is a link. Clicking either opens it in the browser. An address inside a code span stays literal.
+
 ## 4.11.1 — 2026-09-25
 
 **An agent you have not connected is never run.** Connecting an agent is now something you say, not something the extension works out by starting your CLI and seeing what happens.
