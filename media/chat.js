@@ -122,7 +122,7 @@
   // VS Code UI a browser user can't see) and the AFK Pilot account section.
   const IS_REMOTE = !!window.grokRemoteClient;
   // Desktop Electron preload sets grokDesktopShell; VS Code webview never does.
-  // Client-owned font scale (localStorage + keyboard/wheel) applies to remote AND desktop
+  // Client-owned font scale (localStorage + keyboard) applies to remote AND desktop
   // — not the VS Code sidebar, which stays on host `grok.chatFontScale`.
   // Do not key off the file-tree bridge — that API is panel-only; chat.js must not call it.
   const IS_DESKTOP_CLIENT = !!window.grokDesktopShell;
@@ -14680,36 +14680,35 @@
       stepSize: CLIENT_FONT_SCALE_STEP,
       key: CLIENT_FONT_SCALE_KEY,
     };
-    window.addEventListener(
-      "keydown",
-      (e) => {
-        // Require Shift + (Cmd or Ctrl) to zoom in/out with + / -
-        if (!(e.ctrlKey || e.metaKey)) return;
-        const key = e.key;
-        if (e.shiftKey && (key === "+" || key === "=" || key === "Add" || e.code === "Equal")) {
-          e.preventDefault();
-          setClientFontScale(stepClientFontScale(state.remoteFontScale, CLIENT_FONT_SCALE_STEP));
-        } else if (e.shiftKey && (key === "-" || key === "_" || key === "Subtract" || e.code === "Minus")) {
-          e.preventDefault();
-          setClientFontScale(stepClientFontScale(state.remoteFontScale, -CLIENT_FONT_SCALE_STEP));
-        } else if (key === "0" || key === "Digit0" || key === "Numpad0") {
+    window.addEventListener("keydown", (e) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      // Allow zoom over inputs, as before #155.
+      const key = e.key;
+      if (key === "=" || key === "+" || key === "Add") {
+        e.preventDefault();
+        setClientFontScale(stepClientFontScale(state.remoteFontScale, CLIENT_FONT_SCALE_STEP));
+      } else if (key === "-" || key === "Subtract") {
+        e.preventDefault();
+        setClientFontScale(stepClientFontScale(state.remoteFontScale, -CLIENT_FONT_SCALE_STEP));
+      } else if (key === "0" || key === "Digit0" || key === "Numpad0") {
+        if (key === "0" || e.code === "Digit0" || e.code === "Numpad0") {
           e.preventDefault();
           setClientFontScale(1);
         }
-      },
-      true,
-    );
+      }
+    });
 
-    // Disable Cmd+Wheel / Ctrl+Wheel zoom completely
-    window.addEventListener(
-      "wheel",
-      (e) => {
-        if (e.ctrlKey || e.metaKey) {
-          e.preventDefault();
-        }
-      },
-      { passive: false, capture: true },
-    );
+    // Browser clients keep native page zoom, including trackpad pinch (Ctrl+wheel).
+    // Only the desktop shell suppresses accidental modifier+wheel zoom.
+    if (IS_DESKTOP_CLIENT) {
+      window.addEventListener(
+        "wheel",
+        (e) => {
+          if (e.ctrlKey || e.metaKey) e.preventDefault();
+        },
+        { passive: false, capture: true },
+      );
+    }
   }
 
   function setRemoteTtsEnabled(enabled) {
@@ -18984,7 +18983,7 @@
         // The CSS derives both `zoom` and the containing-block height
         // compensation from this one variable, so the composer stays pinned.
         // Client-owned zoom (remote + desktop) ignores host updates so local
-        // keyboard/wheel/slider choice is not clobbered.
+        // keyboard/slider choice is not clobbered.
         state.hostFontScale = Number(msg.value) || 1;
         if (!CLIENT_OWNS_FONT_SCALE) applyChatZoom();
         break;

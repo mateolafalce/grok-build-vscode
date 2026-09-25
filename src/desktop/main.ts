@@ -91,6 +91,7 @@ import {
   installWindowSecurityLocks,
   isTrustedMainFrameIpc,
 } from "./window-security";
+import { installDesktopZoomHandlers } from "./window-zoom";
 import { autoUpdater } from "electron-updater";
 import {
   DESKTOP_RELEASES_API_URL,
@@ -797,36 +798,13 @@ async function createApp(): Promise<void> {
     log("DevTools opened (non-production build); CDP on --remote-debugging-port if passed");
   }
 
+  installDesktopZoomHandlers(mainWindow.webContents, applyDesktopCssZoom);
+
   // Keyboard DevTools without needing the auto-hidden menu bar (Windows).
   // Menu accelerator still works; F12 is the discoverable Chromium habit.
   // Packaged builds keep webPreferences.devTools false so this is a no-op path.
   if (allowDevTools) {
     mainWindow.webContents.on("before-input-event", (event, input) => {
-      // Intercept zooming shortcuts: Cmd/Ctrl + Plus, Cmd/Ctrl + Minus.
-      // We prevent the default so Chromium's native zoom (which overrides our CSS zoom) doesn't fire.
-      if (input.control || input.meta) {
-        // Prevent scrolling combined with Ctrl/Cmd (which defaults to native zoom in browsers)
-        if (input.type === "mouseWheel") {
-          event.preventDefault();
-          return;
-        }
-        
-        const key = input.key.toLowerCase();
-        if (key === "+" || key === "=") {
-          event.preventDefault();
-          if (input.type === "keyDown") applyDesktopCssZoom("in");
-          return;
-        } else if (key === "-") {
-          event.preventDefault();
-          if (input.type === "keyDown") applyDesktopCssZoom("out");
-          return;
-        } else if (key === "0") {
-          event.preventDefault();
-          if (input.type === "keyDown") applyDesktopCssZoom("reset");
-          return;
-        }
-      }
-      
       if (!isDesktopDevToolsShortcut(input)) return;
       event.preventDefault();
       mainWindow?.webContents.toggleDevTools();
